@@ -3,6 +3,7 @@ from antlr4 import *
 from CompiscriptLexer import CompiscriptLexer
 from CompiscriptParser import CompiscriptParser
 from graphviz import Digraph
+from Visitor import Visitor
 
 def tree_to_graph(tree, rule_names, graph=None, parent=None, count=[0]):
     if graph is None:
@@ -47,7 +48,10 @@ def main(argv):
     stream = CommonTokenStream(lexer)
     parser = CompiscriptParser(stream)
     tree = parser.program()  # We are using 'prog' since this is the starting rule based on our Compiscript grammar, yay!
-    
+
+    visitor = Visitor()
+    visitor.visit(tree)
+
     graph = tree_to_graph(tree, parser.ruleNames)
     graph.render('parse_tree', format='png', cleanup=True)
 
