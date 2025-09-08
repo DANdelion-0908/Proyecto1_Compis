@@ -5,6 +5,10 @@ class Visitor(CompiscriptVisitor):
     def __init__(self):
         self.symbol_table = {}
 
+    # ************************
+    # *** Variable Methods ***
+    # ************************
+
     def visitIdentifierExpr(self, ctx:CompiscriptParser.IdentifierExprContext):
         var_name = ctx.Identifier().getText()
 
@@ -95,7 +99,10 @@ class Visitor(CompiscriptVisitor):
             raise Exception(f"Type error: variable '{var_name}' is {declared_type} but assigned {assigned_type}")
 
         return self.visitChildren(ctx)
-
+    
+    # **************************
+    # *** Expression Methods ***
+    # **************************
 
     def visitExpressionStatement(self, ctx:CompiscriptParser.ExpressionStatementContext):
         return self.visit(ctx.expression())
@@ -112,6 +119,9 @@ class Visitor(CompiscriptVisitor):
                 raise Exception(f"Type error while evaluating {left} {operator} {right}")
         else:
             return self.visit(ctx.getChild(0))
+        
+
+    # Arithmetic methods
 
     def visitMultiplicativeExpr(self, ctx:CompiscriptParser.MultiplicativeExprContext):
         if ctx.getChildCount() == 3:
@@ -131,6 +141,8 @@ class Visitor(CompiscriptVisitor):
                 return "boolean"
             raise Exception(f"Type error: logical operator requires booleans, got {left} and {right}")
         return self.visit(ctx.getChild(0))
+
+    # Logical methods
 
     def visitLogicalOrExpr(self, ctx:CompiscriptParser.LogicalOrExprContext):
         if ctx.getChildCount() == 3:
@@ -153,13 +165,15 @@ class Visitor(CompiscriptVisitor):
                 raise Exception(f"Type error: operator {operator} not valid for {operand}")
         return self.visit(ctx.getChild(0))
     
+    # Comparison methods
+
     def visitEqualityExpr(self, ctx:CompiscriptParser.EqualityExprContext):
         if ctx.getChildCount() == 3:
             left = self.visit(ctx.getChild(0))
             operator = ctx.getChild(1).getText()
             right = self.visit(ctx.getChild(2))
     
-            if operator in ["==", "!="]:
+            if operator in ["==", "!=", "===", "!=="]:
                 if left == right:
                     return "boolean"
                 elif left in ["integer", "float"] and right in ["integer", "float"]:
@@ -171,16 +185,26 @@ class Visitor(CompiscriptVisitor):
         else:    
             return self.visit(ctx.getChild(0))
 
-    
     def visitRelationalExpr(self, ctx:CompiscriptParser.RelationalExprContext):
         if ctx.getChildCount() == 3:
             left = self.visit(ctx.getChild(0))
             right = self.visit(ctx.getChild(2))
             operator = ctx.getChild(1).getText()
 
-            if left in ["integer", "float"] and right in ["integer", "float"]:
-                return "boolean"
+            if operator in ["<", ">", "<=", ">="]:
+                if left == right:
+                    return "boolean"
+                elif left in ["integer", "float"] and right in ["integer", "float"]:
+                    return "boolean"
+                else:
+                    raise Exception(f"Type error: cannot compare {left} and {right} with {operator}")
             else:
-                raise Exception(f"Type error: cannot compare {left} and {right} with {operator}")
-        
-        return super().visitRelationalExpr(ctx)
+                raise Exception(f"Unknown relational operator '{operator}'")
+
+        return self.visit(ctx.getChild(0))
+    
+    # *********************
+    # *** Scope Methods ***
+    # *********************
+
+    
