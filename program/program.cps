@@ -6,6 +6,6 @@ let b: boolean = true;
 
 let a: integer = c / 1;
 
-const f: a = true;
+const f: boolean = true;
 
 f = 2 + 5;
