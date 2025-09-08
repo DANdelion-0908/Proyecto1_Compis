@@ -65,7 +65,9 @@ RUN ./python-venv.sh
 
 COPY requirements.txt .
 # Not production-intended, never do this, this is just a simple example
-RUN pip install -r requirements.txt --break-system-packages 
+# agregado --ignore-installed para poder instalar nuevas librerias 
+RUN pip install --ignore-installed -r requirements.txt --break-system-packages 
+
 
 # Set user
 ARG USER=appuser
