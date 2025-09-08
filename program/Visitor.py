@@ -11,7 +11,7 @@ class Visitor(CompiscriptVisitor):
         if var_name not in self.symbol_table:
             raise Exception(f"Variable '{var_name}' not declared.")
 
-        return self.symbol_table[var_name]
+        return self.symbol_table[var_name]['type']
 
     def visitLiteralExpr(self, ctx:CompiscriptParser.LiteralExprContext):
         text = ctx.getText()
@@ -47,7 +47,11 @@ class Visitor(CompiscriptVisitor):
                 
             declared_type = declared_type or init_type
 
-        self.symbol_table[var_name] = declared_type or "unknown"
+        self.symbol_table[var_name] = {
+            "type": declared_type or "unknown",
+            "const": False
+            }
+        
         return self.visitChildren(ctx)
 
     def visitConstantDeclaration(self, ctx:CompiscriptParser.ConstantDeclarationContext):
@@ -71,7 +75,7 @@ class Visitor(CompiscriptVisitor):
             "const": True
         }
 
-        return None
+        return self.visitChildren(ctx)
 
     def visitAssignment(self, ctx:CompiscriptParser.AssignmentContext):
         var_name = ctx.Identifier().getText()
@@ -90,7 +94,7 @@ class Visitor(CompiscriptVisitor):
         if declared_type != assigned_type:
             raise Exception(f"Type error: variable '{var_name}' is {declared_type} but assigned {assigned_type}")
 
-        return None
+        return self.visitChildren(ctx)
 
 
     def visitExpressionStatement(self, ctx:CompiscriptParser.ExpressionStatementContext):
@@ -117,4 +121,34 @@ class Visitor(CompiscriptVisitor):
                 return "float" if "float" in (left, right) else "integer"
             else:
                 raise Exception(f"Type error: cannot apply {ctx.getChild(1).getText()} to {left} and {right}")
+        return self.visit(ctx.getChild(0))
+    
+    def visitLogicalAndExpr(self, ctx:CompiscriptParser.LogicalAndExprContext):
+        if ctx.getChildCount() == 3:
+            left = self.visit(ctx.getChild(0))
+            right = self.visit(ctx.getChild(2))
+            if left == right == "boolean":
+                return "boolean"
+            raise Exception(f"Type error: logical operator requires booleans, got {left} and {right}")
+        return self.visit(ctx.getChild(0))
+
+    def visitLogicalOrExpr(self, ctx:CompiscriptParser.LogicalOrExprContext):
+        if ctx.getChildCount() == 3:
+            left = self.visit(ctx.getChild(0))
+            right = self.visit(ctx.getChild(2))
+            if left == right == "boolean":
+                return "boolean"
+            raise Exception(f"Type error: logical operator requires booleans, got {left} and {right}")
+        return self.visit(ctx.getChild(0))
+
+    def visitUnaryExpr(self, ctx:CompiscriptParser.UnaryExprContext):
+        if ctx.getChildCount() == 2:
+            operator = ctx.getChild(0).getText()
+            operand = self.visit(ctx.getChild(1))
+            if operator == "-" and operand in ["integer", "float"]:
+                return operand
+            elif operator == "!" and operand == "boolean":
+                return "boolean"
+            else:
+                raise Exception(f"Type error: operator {operator} not valid for {operand}")
         return self.visit(ctx.getChild(0))
