@@ -154,7 +154,7 @@ arrayLiteral: '[' (expression (',' expression)*)? ']';
 // ------------------
 
 type: baseType ('[' ']')*;
-baseType: 'boolean' | 'integer' | 'string' | Identifier;
+baseType: 'boolean' | 'integer' | 'string' | 'float' | Identifier;
 
 // ------------------
 // Lexer Rules
@@ -163,9 +163,11 @@ baseType: 'boolean' | 'integer' | 'string' | Identifier;
 Literal
   : IntegerLiteral
   | StringLiteral
+  | FloatLiteral
   ;
 
 IntegerLiteral: [0-9]+;
+FloatLiteral: [0-9]+.[0-9]+;
 StringLiteral: '"' (~["\r\n])* '"';
 
 Identifier: [a-zA-Z_][a-zA-Z0-9_]*;

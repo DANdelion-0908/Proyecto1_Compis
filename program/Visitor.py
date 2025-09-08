@@ -18,6 +18,8 @@ class Visitor(CompiscriptVisitor):
 
         if text.isdigit():
             return "integer"
+        elif text.replace('.', '', 1).isdigit() and text.count('.') < 2:
+            return "float"
         elif text.startswith('"') and text.endswith('"'):
             return "string"
         elif text == "true" or text == "false":
