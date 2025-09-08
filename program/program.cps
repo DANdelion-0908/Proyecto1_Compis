@@ -10,4 +10,4 @@ let g: string = "aaa";
 
 const f: boolean = true;
 
-f && g;
+c >= e;

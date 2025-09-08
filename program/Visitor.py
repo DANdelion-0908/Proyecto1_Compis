@@ -152,3 +152,35 @@ class Visitor(CompiscriptVisitor):
             else:
                 raise Exception(f"Type error: operator {operator} not valid for {operand}")
         return self.visit(ctx.getChild(0))
+    
+    def visitEqualityExpr(self, ctx:CompiscriptParser.EqualityExprContext):
+        if ctx.getChildCount() == 3:
+            left = self.visit(ctx.getChild(0))
+            operator = ctx.getChild(1).getText()
+            right = self.visit(ctx.getChild(2))
+    
+            if operator in ["==", "!="]:
+                if left == right:
+                    return "boolean"
+                elif left in ["integer", "float"] and right in ["integer", "float"]:
+                    return "boolean"
+                else:
+                    raise Exception(f"Type error: cannot apply '{operator}' between {left} and {right}")
+            else:
+                raise Exception(f"Unknown equality operator '{operator}'")
+        else:    
+            return self.visit(ctx.getChild(0))
+
+    
+    def visitRelationalExpr(self, ctx:CompiscriptParser.RelationalExprContext):
+        if ctx.getChildCount() == 3:
+            left = self.visit(ctx.getChild(0))
+            right = self.visit(ctx.getChild(2))
+            operator = ctx.getChild(1).getText()
+
+            if left in ["integer", "float"] and right in ["integer", "float"]:
+                return "boolean"
+            else:
+                raise Exception(f"Type error: cannot compare {left} and {right} with {operator}")
+        
+        return super().visitRelationalExpr(ctx)
