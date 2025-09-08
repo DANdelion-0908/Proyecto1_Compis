@@ -40,11 +40,42 @@ class Visitor(CompiscriptVisitor):
         if ctx.initializer():
             init_type = self.visit(ctx.initializer().expression())
             if declared_type and declared_type != init_type:
-                raise Exception(f"Type error: variable '{var_name}' declared as {declared_type} but initialized with a different type.")
+                if declared_type in ["integer", "float", "string", "boolean"]:
+                    raise Exception(f"Type error: variable '{var_name}' declared as {declared_type} but initialized with a different type.")
+                else:
+                    raise Exception(f"Type error: type '{declared_type}' not recognized.")
+                
             declared_type = declared_type or init_type
 
         self.symbol_table[var_name] = declared_type or "unknown"
         return self.visitChildren(ctx)
+
+    def visitConstantDeclaration(self, ctx:CompiscriptParser.ConstantDeclarationContext):
+        const_name = ctx.Identifier().getText()
+
+        if const_name in self.symbol_table:
+            raise Exception(f"Identifier '{const_name}' already declared.")
+
+        # Extraer el tipo declarado (si existe)
+        declared_type = ctx.typeAnnotation().type_().getText() if ctx.typeAnnotation() else None
+
+        # Evaluar el tipo del valor asignado
+        init_type = self.visit(ctx.expression())
+
+        # Si hay tipo declarado, verificar compatibilidad
+        if declared_type and declared_type != init_type:
+                if declared_type in ["integer", "float", "string", "boolean"]:
+                    raise Exception(f"Type error: constant '{const_name}' declared as {declared_type} but initialized with a different type.")
+                else:
+                    raise Exception(f"Type error: type '{declared_type}' not recognized.")
+
+        # Guardar en tabla de símbolos
+        self.symbol_table[const_name] = {
+            "type": declared_type if declared_type else init_type,
+            "const": True
+        }
+
+        return None
 
 
     def visitAssignment(self, ctx:CompiscriptParser.AssignmentContext):
