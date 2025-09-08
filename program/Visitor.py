@@ -20,6 +20,8 @@ class Visitor(CompiscriptVisitor):
             return "integer"
         elif text.startswith('"') and text.endswith('"'):
             return "string"
+        elif text == "true" or text == "false":
+            return "boolean"
         else:
             raise Exception(f"Unknown literal: {text}")
 
@@ -33,7 +35,6 @@ class Visitor(CompiscriptVisitor):
         if ctx.typeAnnotation():
             declared_type = ctx.typeAnnotation().getText().replace(":", "").strip()
 
-        # Si tiene inicializador, inferimos su tipo
         if ctx.initializer():
             init_type = self.visit(ctx.initializer().expression())
             if declared_type and declared_type != init_type:
@@ -54,7 +55,6 @@ class Visitor(CompiscriptVisitor):
 
     def visitExpressionStatement(self, ctx:CompiscriptParser.ExpressionStatementContext):
         return self.visit(ctx.expression())
-
 
     def visitAdditiveExpr(self, ctx:CompiscriptParser.AdditiveExprContext):
         if ctx.getChildCount() == 3:

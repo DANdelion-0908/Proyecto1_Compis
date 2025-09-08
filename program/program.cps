@@ -1,3 +1,5 @@
 let c: integer = 5;
 
-let a: integer = c;
+let b: boolean = true;
+
+let a: integer = c / 1;
