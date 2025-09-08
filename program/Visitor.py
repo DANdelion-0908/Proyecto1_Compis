@@ -108,3 +108,13 @@ class Visitor(CompiscriptVisitor):
                 raise Exception(f"Type error while evaluating {left} {operator} {right}")
         else:
             return self.visit(ctx.getChild(0))
+
+    def visitMultiplicativeExpr(self, ctx:CompiscriptParser.MultiplicativeExprContext):
+        if ctx.getChildCount() == 3:
+            left = self.visit(ctx.getChild(0))
+            right = self.visit(ctx.getChild(2))
+            if left in ["integer", "float"] and right in ["integer", "float"]:
+                return "float" if "float" in (left, right) else "integer"
+            else:
+                raise Exception(f"Type error: cannot apply {ctx.getChild(1).getText()} to {left} and {right}")
+        return self.visit(ctx.getChild(0))

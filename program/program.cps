@@ -6,6 +6,8 @@ let b: boolean = true;
 
 let a: integer = c / 1;
 
+let g: string = "aaa";
+
 const f: boolean = true;
 
-f = 2 + 5;
+c * g;
