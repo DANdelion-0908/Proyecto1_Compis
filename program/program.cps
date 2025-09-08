@@ -1,1 +1,3 @@
-let c: boolean = 5 && false;
+let c: integer = 5;
+
+let a: integer = c;
