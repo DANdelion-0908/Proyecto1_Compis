@@ -67,6 +67,7 @@ COPY requirements.txt .
 # Not production-intended, never do this, this is just a simple example
 # agregado --ignore-installed para poder instalar nuevas librerias 
 RUN pip install --ignore-installed -r requirements.txt --break-system-packages 
+RUN apt-get update && apt-get install -y graphviz
 
 
 # Set user
