@@ -8,6 +8,6 @@ let a: integer = c / 1;
 
 let g: string = "aaa";
 
-const f: boolean = true;
+const f: boolean = 5;
 
-c >= e;
+c >= true;

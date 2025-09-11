@@ -3,7 +3,8 @@ from CompiscriptVisitor import CompiscriptVisitor
 
 class Visitor(CompiscriptVisitor):
     def __init__(self):
-        self.symbol_table = {}
+        self.symbol_table_stack = [{}]
+        self.error_list = []
 
     # ************************
     # *** Variable Methods ***
@@ -11,11 +12,8 @@ class Visitor(CompiscriptVisitor):
 
     def visitIdentifierExpr(self, ctx:CompiscriptParser.IdentifierExprContext):
         var_name = ctx.Identifier().getText()
-
-        if var_name not in self.symbol_table:
-            raise Exception(f"Variable '{var_name}' not declared.")
-
-        return self.symbol_table[var_name]['type']
+        var_info = self.resolve_symbol(ctx, var_name)  # 🔹 usar resolve_symbol
+        return var_info["type"]
 
     def visitLiteralExpr(self, ctx:CompiscriptParser.LiteralExprContext):
         text = ctx.getText()
@@ -29,13 +27,10 @@ class Visitor(CompiscriptVisitor):
         elif text == "true" or text == "false":
             return "boolean"
         else:
-            raise Exception(f"Unknown literal: {text}")
+            self.report_error(ctx, f"Unknown literal: {text}")
 
     def visitVariableDeclaration(self, ctx:CompiscriptParser.VariableDeclarationContext):
         var_name = ctx.Identifier().getText()
-
-        if var_name in self.symbol_table:
-            raise Exception(f"Variable '{var_name}' already declared.")
 
         declared_type = None
         if ctx.typeAnnotation():
@@ -44,59 +39,43 @@ class Visitor(CompiscriptVisitor):
         if ctx.initializer():
             init_type = self.visit(ctx.initializer().expression())
             if declared_type and declared_type != init_type:
-                if declared_type in ["integer", "float", "string", "boolean"]:
-                    raise Exception(f"Type error: variable '{var_name}' declared as {declared_type} but initialized with a different type.")
-                else:
-                    raise Exception(f"Type error: type '{declared_type}' not recognized.")
-                
+                self.report_error(ctx, f"Type error: variable '{var_name}' declared as {declared_type} but initialized with {init_type}")
             declared_type = declared_type or init_type
 
-        self.symbol_table[var_name] = {
+        self.declare_symbol(ctx, var_name, {  # 🔹 usar declare_symbol
             "type": declared_type or "unknown",
             "const": False
-            }
-        
+        })
+
         return self.visitChildren(ctx)
 
     def visitConstantDeclaration(self, ctx:CompiscriptParser.ConstantDeclarationContext):
         const_name = ctx.Identifier().getText()
-
-        if const_name in self.symbol_table:
-            raise Exception(f"Identifier '{const_name}' already declared.")
-
         declared_type = ctx.typeAnnotation().type_().getText() if ctx.typeAnnotation() else None
 
         init_type = self.visit(ctx.expression())
-
         if declared_type and declared_type != init_type:
-                if declared_type in ["integer", "float", "string", "boolean"]:
-                    raise Exception(f"Type error: constant '{const_name}' declared as {declared_type} but initialized with a different type.")
-                else:
-                    raise Exception(f"Type error: type '{declared_type}' not recognized.")
+            self.report_error(ctx, f"Type error: constant '{const_name}' declared as {declared_type} but initialized with {init_type}")
 
-        self.symbol_table[const_name] = {
+        self.declare_symbol(ctx, const_name, {  # 🔹 usar declare_symbol
             "type": declared_type if declared_type else init_type,
             "const": True
-        }
+        })
 
         return self.visitChildren(ctx)
 
     def visitAssignment(self, ctx:CompiscriptParser.AssignmentContext):
         var_name = ctx.Identifier().getText()
+        var_info = self.resolve_symbol(ctx, var_name)  # 🔹 usar resolve_symbol
 
-        if var_name not in self.symbol_table:
-            raise Exception(f"Variable '{var_name}' not declared.")
-
-        var_info = self.symbol_table[var_name]
-
-        if isinstance(var_info, dict) and var_info.get("const", False):
-            raise Exception(f"Reassignment to constant '{var_name}' is not allowed.")
+        if var_info.get("const", False):
+            self.report_error(ctx, f"Reassignment to constant '{var_name}' is not allowed.")
 
         assigned_type = self.visit(ctx.expression())
-        declared_type = var_info["type"] if isinstance(var_info, dict) else var_info
+        declared_type = var_info["type"]
 
         if declared_type != assigned_type:
-            raise Exception(f"Type error: variable '{var_name}' is {declared_type} but assigned {assigned_type}")
+            self.report_error(ctx, f"Type error: variable '{var_name}' is {declared_type} but assigned {assigned_type}")
 
         return self.visitChildren(ctx)
     
@@ -116,11 +95,10 @@ class Visitor(CompiscriptVisitor):
             if left in ["integer", "float"] and right in ["integer", "float"]:
                 return "float" if "float" in (left, right) else "integer"
             else:
-                raise Exception(f"Type error while evaluating {left} {operator} {right}")
+                self.report_error(ctx, f"Type error while evaluating {left} {operator} {right}")
         else:
             return self.visit(ctx.getChild(0))
         
-
     # Arithmetic methods
 
     def visitMultiplicativeExpr(self, ctx:CompiscriptParser.MultiplicativeExprContext):
@@ -130,7 +108,7 @@ class Visitor(CompiscriptVisitor):
             if left in ["integer", "float"] and right in ["integer", "float"]:
                 return "float" if "float" in (left, right) else "integer"
             else:
-                raise Exception(f"Type error: cannot apply {ctx.getChild(1).getText()} to {left} and {right}")
+                self.report_error(ctx, f"Type error: cannot apply {ctx.getChild(1).getText()} to {left} and {right}")
         return self.visit(ctx.getChild(0))
     
     def visitLogicalAndExpr(self, ctx:CompiscriptParser.LogicalAndExprContext):
@@ -139,7 +117,7 @@ class Visitor(CompiscriptVisitor):
             right = self.visit(ctx.getChild(2))
             if left == right == "boolean":
                 return "boolean"
-            raise Exception(f"Type error: logical operator requires booleans, got {left} and {right}")
+            self.report_error(ctx, f"Type error: logical operator requires booleans, got {left} and {right}")
         return self.visit(ctx.getChild(0))
 
     # Logical methods
@@ -150,7 +128,7 @@ class Visitor(CompiscriptVisitor):
             right = self.visit(ctx.getChild(2))
             if left == right == "boolean":
                 return "boolean"
-            raise Exception(f"Type error: logical operator requires booleans, got {left} and {right}")
+            self.report_error(ctx, f"Type error: logical operator requires booleans, got {left} and {right}")
         return self.visit(ctx.getChild(0))
 
     def visitUnaryExpr(self, ctx:CompiscriptParser.UnaryExprContext):
@@ -162,7 +140,7 @@ class Visitor(CompiscriptVisitor):
             elif operator == "!" and operand == "boolean":
                 return "boolean"
             else:
-                raise Exception(f"Type error: operator {operator} not valid for {operand}")
+                self.report_error(ctx, f"Type error: operator {operator} not valid for {operand}")
         return self.visit(ctx.getChild(0))
     
     # Comparison methods
@@ -179,9 +157,9 @@ class Visitor(CompiscriptVisitor):
                 elif left in ["integer", "float"] and right in ["integer", "float"]:
                     return "boolean"
                 else:
-                    raise Exception(f"Type error: cannot apply '{operator}' between {left} and {right}")
+                    self.report_error(ctx, f"Type error: cannot apply '{operator}' between {left} and {right}")
             else:
-                raise Exception(f"Unknown equality operator '{operator}'")
+                self.report_error(ctx, f"Unknown equality operator '{operator}'")
         else:    
             return self.visit(ctx.getChild(0))
 
@@ -197,9 +175,9 @@ class Visitor(CompiscriptVisitor):
                 elif left in ["integer", "float"] and right in ["integer", "float"]:
                     return "boolean"
                 else:
-                    raise Exception(f"Type error: cannot compare {left} and {right} with {operator}")
+                    self.report_error(ctx, f"Type error: cannot compare {left} and {right} with {operator}")
             else:
-                raise Exception(f"Unknown relational operator '{operator}'")
+                self.report_error(ctx, f"Unknown relational operator '{operator}'")
 
         return self.visit(ctx.getChild(0))
     
@@ -207,4 +185,47 @@ class Visitor(CompiscriptVisitor):
     # *** Scope Methods ***
     # *********************
 
-    
+    def current_scope(self):
+        """Devuelve el scope actual (el más interno)."""
+        return self.symbol_table_stack[-1]
+
+    def enter_scope(self):
+        """Entra a un nuevo scope (bloque o función)."""
+        self.symbol_table_stack.append({})
+
+    def exit_scope(self):
+        """Sale del scope actual."""
+        self.symbol_table_stack.pop()
+
+    def declare_symbol(self, ctx, name, info):
+        scope = self.current_scope()
+        if name in scope:
+            self.report_error(ctx, f"Identifier '{name}' already declared in this scope.")
+        scope[name] = info
+
+
+    def resolve_symbol(self, ctx, name):
+        """Busca un símbolo recorriendo scopes de adentro hacia afuera."""
+        for scope in reversed(self.symbol_table_stack):
+            if name in scope:
+                return scope[name]
+        self.report_error(ctx, f"Variable '{name}' not declared.")
+
+    # **************************
+    # *** Errors Methods ***
+    # **************************
+
+    def visitProgram(self, ctx:CompiscriptParser.ProgramContext):
+        self.visitChildren(ctx)
+        if self.error_list:
+            for error in self.error_list:
+                print(f"Error at line {error['Line']}: {error['Error']}")
+        else:
+            print("No semantic errors found.")
+        return None
+
+    def report_error(self, ctx, message):
+        self.error_list.append({
+            "Line": ctx.start.line,
+            "Error": Exception(message)})
+        
