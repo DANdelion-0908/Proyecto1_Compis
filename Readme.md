@@ -17,11 +17,17 @@ docker build --rm . -t csp-image && docker run --rm -ti -p 5050:5050 -v "%cd%\pr
 ```
 
 Linux
-```
+```bash
 docker build --rm . -t csp-image && docker run --rm -ti -p 5050:5050 -v "$(pwd)/program":/program csp-image
 ```
 
-### ¿Cómo usar el IDE?
+### Generar y probar el lenguaje
+```bash
+antlr -Dlanguage=Python3 Compiscript.g4
+python3 Driver.py program.cps
 ```
+
+## ¿Cómo usar el IDE?
+```bash
 python3 ide/app.py
 ```
