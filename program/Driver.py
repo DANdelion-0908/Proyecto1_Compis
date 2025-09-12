@@ -4,6 +4,7 @@ from CompiscriptLexer import CompiscriptLexer
 from CompiscriptParser import CompiscriptParser
 from graphviz import Digraph
 from Visitor import Visitor
+from antlr4 import InputStream
 
 def tree_to_graph(tree, rule_names, graph=None, parent=None, count=[0]):
     if graph is None:
@@ -30,17 +31,19 @@ def tree_to_graph(tree, rule_names, graph=None, parent=None, count=[0]):
 
     return graph
 
-def parse_text(text: str):
-    input_stream = InputStream(text)
+
+def parse_text(code: str):
+    input_stream = InputStream(code)
     lexer = CompiscriptLexer(input_stream)
     stream = CommonTokenStream(lexer)
     parser = CompiscriptParser(stream)
     tree = parser.program()
 
     graph = tree_to_graph(tree, parser.ruleNames)
-    graph.render('parse_tree', format='png', cleanup=True)
-
-    return "Parse successful"
+    output_path = "parse_tree" 
+    graph.render(output_path, format='png', cleanup=True)
+    
+    return output_path + ".png"
 
 def main(argv):
     input_stream = FileStream(argv[1])
