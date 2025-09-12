@@ -34,9 +34,9 @@
     {% endif %}
   {% endif %}
 
-  {% if parse_tree %}
-    <h2>Árbol de análisis (parse tree)</h2>
-    <pre>{{ parse_tree }}</pre>
+  {% if image_url %}
+    <h3>Árbol de sintaxis generado:</h3>
+    <img src="{{ image_url }}" alt="Parse Tree" style="max-width:100%; border:1px solid #ccc;"/>
   {% endif %}
 </body>
 </html>
