@@ -15,18 +15,28 @@ PARENT_DIR = os.path.dirname(BASE_DIR)
 def index():
     result = None
     image_url = None
+    symbol_table = None
 
     if request.method == "POST":
         code = request.form.get("code", "")
         try:
-            image_path = parse_text(code)  # genera el PNG
-            result = "Parser OK ✅"
-            # Solo guardamos el nombre del archivo para el template
-            image_url = "/static_result/" + os.path.basename(image_path)
+            parse_result = parse_text(code)
+            
+            # Combine syntax and semantic errors
+            all_errors = parse_result["syntax_errors"] + parse_result["semantic_errors"]
+            
+            if all_errors:
+                result = {"status": "error", "messages": all_errors}
+            else:
+                result = {"status": "ok", "messages": ["Parser OK ✅"]}
+                symbol_table = parse_result["symbol_table"]
+            
+            image_url = "/static_result/" + os.path.basename(parse_result["image_path"])
+            
         except Exception as e:
-            result = f"Parser/Runtime error: {e}"
+            result = {"status": "error", "messages": [f"Unexpected error: {e}"]}
 
-    return render_template("index.html", result=result, image_url=image_url)
+    return render_template("index.html", result=result, image_url=image_url, symbol_table=symbol_table)
 
 # Servir parse_tree.png desde el directorio padre (donde se genera)
 @app.route("/static_result/<filename>")
@@ -35,4 +45,4 @@ def static_result(filename):
 
 if __name__ == "__main__":
     # Flask corre en 0.0.0.0 para ser accesible desde fuera del contenedor
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5050, debug=True)
