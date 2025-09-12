@@ -8,6 +8,30 @@ let a: integer = c / 1;
 
 let g: string = "aaa";
 
-const f: boolean = 5;
+const f: boolean = true;
 
-c >= true;
+let x: integer = 5;
+
+let y: boolean = !(x < 5 || x > 20);
+
+let arr: boolean[] = [true];
+
+let ma: boolean = arr[0];
+
+if (true) {
+
+} else {
+
+}
+
+while (false) {
+
+}
+
+for (let xx: integer = 0; xx < 10; xx + 1) {
+
+}
+
+foreach (element in arr) {
+
+}
