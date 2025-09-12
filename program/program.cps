@@ -16,7 +16,7 @@ let y: boolean = !(x < 5 || x > 20);
 
 let arr: boolean[] = [true];
 
-let ma: boolean = arr[0];
+let ma: boolean = arr[5];
 
 if (true) {
 
@@ -34,5 +34,13 @@ for (let xx: integer = 0; xx < 10; xx + 1) {
 
 foreach (element in arr) {
     break;
+
+}
+
+function movida(a: integer, b: integer): integer {
+    let result = a + b;
+    return result;
+
+    result = movida(a, b);
 
 }

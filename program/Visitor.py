@@ -4,10 +4,12 @@ from CompiscriptVisitor import CompiscriptVisitor
 class Visitor(CompiscriptVisitor):
     def __init__(self):
         self.symbol_table = {}
-        self.errors = []  # Add errors list
-        self.loop_depth = 0  # Track loop depth for break/continue
+        self.errors = []  # List to store semantic errors
+        self.loop_depth = 0  # Track loop depth for break/continue statements
+        self.function_stack = []  # Track function context for return type checking
 
     def add_error(self, message, ctx):
+        # Add an error message with line information to the errors list
         line = ctx.start.line if ctx and ctx.start else "unknown"
         self.errors.append(f"Error at line {line}: {message}")
 
@@ -16,19 +18,26 @@ class Visitor(CompiscriptVisitor):
     # ************************
 
     def visitIdentifierExpr(self, ctx:CompiscriptParser.IdentifierExprContext):
+        # Handle variable identifier expressions
         var_name = ctx.Identifier().getText()
 
+        # Check if the variable is declared
         if var_name not in self.symbol_table:
             self.add_error(f"Variable '{var_name}' not declared.", ctx)
             return "unknown"
+        
+        # Return the type of the variable
         return self.symbol_table[var_name]['type']
 
     def visitLiteralExpr(self, ctx:CompiscriptParser.LiteralExprContext):
+        # Handle literal expressions (numbers, strings, booleans, arrays)
         text = ctx.getText()
 
+        # Check for array literal and delegate to visitArrayLiteral
         if ctx.arrayLiteral():
             return self.visitArrayLiteral(ctx.arrayLiteral())
 
+        # Determine the type of the literal
         if text.isdigit():
             return "integer"
         elif text.replace('.', '', 1).isdigit() and text.count('.') < 2:
@@ -42,31 +51,38 @@ class Visitor(CompiscriptVisitor):
             return "unknown"
 
     def visitVariableDeclaration(self, ctx:CompiscriptParser.VariableDeclarationContext):
+        # Handle variable declarations
         var_name = ctx.Identifier().getText()
 
+        # Check if variable already declared
         if var_name in self.symbol_table:
             self.add_error(f"Variable '{var_name}' already declared.", ctx)
             return self.visitChildren(ctx)
 
         declared_type = None
 
+        # Check for type annotation
         if ctx.typeAnnotation():
             declared_type = ctx.typeAnnotation().getText().replace(":", "").strip()
 
+        # Check initializer type and compare with declared type
         if ctx.initializer():
             init_type = self.visit(ctx.initializer().expression())
             if declared_type and declared_type != init_type:
-                # Caso especial: comparar arreglos
+                # Handle arrays specifically
                 if declared_type.endswith("[]") and init_type.endswith("[]"):
                     elem_decl = declared_type.replace("[]", "")
                     elem_init = init_type.replace("[]", "")
                     if elem_decl != elem_init:
                         self.add_error(f"Type error: variable '{var_name}' declared as {declared_type} but initialized with {init_type}", ctx)
+                # Handle type errors
                 elif declared_type != init_type:
                     self.add_error(f"Type error: variable '{var_name}' declared as {declared_type} but initialized with {init_type}", ctx)
 
+            # Use initializer type if no declared type
             declared_type = declared_type or init_type
 
+        # Store variable in symbol table
         self.symbol_table[var_name] = {
             "type": declared_type or "unknown",
             "const": False
@@ -75,6 +91,7 @@ class Visitor(CompiscriptVisitor):
         return self.visitChildren(ctx)
 
     def visitConstantDeclaration(self, ctx:CompiscriptParser.ConstantDeclarationContext):
+        # Handle constant declarations
         const_name = ctx.Identifier().getText()
 
         if const_name in self.symbol_table:
@@ -85,6 +102,7 @@ class Visitor(CompiscriptVisitor):
 
         init_type = self.visit(ctx.expression())
 
+        # Check type consistency for constants
         if declared_type and declared_type != init_type:
                 if declared_type in ["integer", "float", "string", "boolean"]:
                     self.add_error(f"Type error: constant '{const_name}' declared as {declared_type} but initialized with a different type.", ctx)
@@ -99,6 +117,7 @@ class Visitor(CompiscriptVisitor):
         return self.visitChildren(ctx)
 
     def visitAssignment(self, ctx:CompiscriptParser.AssignmentContext):
+        # Handle assignment statements
         var_name = ctx.Identifier().getText()
 
         if var_name not in self.symbol_table:
@@ -107,6 +126,7 @@ class Visitor(CompiscriptVisitor):
 
         var_info = self.symbol_table[var_name]
 
+        # Prevent reassignment to constants
         if isinstance(var_info, dict) and var_info.get("const", False):
             self.add_error(f"Reassignment to constant '{var_name}' is not allowed.", ctx)
             return self.visitChildren(ctx)
@@ -114,6 +134,7 @@ class Visitor(CompiscriptVisitor):
         assigned_type = self.visit(ctx.expression())
         declared_type = var_info["type"] if isinstance(var_info, dict) else var_info
 
+        # Check type consistency for assignments
         if declared_type != assigned_type:
             self.add_error(f"Type error: variable '{var_name}' is {declared_type} but assigned {assigned_type}", ctx)
 
@@ -124,41 +145,54 @@ class Visitor(CompiscriptVisitor):
     # **************************
 
     def visitExpressionStatement(self, ctx:CompiscriptParser.ExpressionStatementContext):
+        # Handle expression statements
         return self.visit(ctx.expression())
 
     def visitAdditiveExpr(self, ctx:CompiscriptParser.AdditiveExprContext):
+        # Handle additive expressions (+, -)
         if ctx.getChildCount() == 3:
             left = self.visit(ctx.getChild(0))
             right = self.visit(ctx.getChild(2))
             operator = ctx.getChild(1).getText()
 
+            # Allow operations between integers and floats
             if left in ["integer", "float"] and right in ["integer", "float"]:
                 return "float" if "float" in (left, right) else "integer"
+            
             else:
                 self.add_error(f"Type error while evaluating {left} {operator} {right}", ctx)
                 return "unknown"
+            
         else:
             return self.visit(ctx.getChild(0))
 
     # Arithmetic methods
 
     def visitMultiplicativeExpr(self, ctx:CompiscriptParser.MultiplicativeExprContext):
+        # Handle multiplicative expressions (*, /, %)
         if ctx.getChildCount() == 3:
             left = self.visit(ctx.getChild(0))
             right = self.visit(ctx.getChild(2))
+
+            # Allow operations between integers and floats
             if left in ["integer", "float"] and right in ["integer", "float"]:
                 return "float" if "float" in (left, right) else "integer"
             else:
                 self.add_error(f"Type error: cannot apply {ctx.getChild(1).getText()} to {left} and {right}", ctx)
                 return "unknown"
+            
         return self.visit(ctx.getChild(0))
     
     def visitLogicalAndExpr(self, ctx:CompiscriptParser.LogicalAndExprContext):
+        # Handle logical AND expressions (&&)
         if ctx.getChildCount() == 3:
             left = self.visit(ctx.getChild(0))
             right = self.visit(ctx.getChild(2))
+
+            # Check both sides are boolean
             if left == right == "boolean":
                 return "boolean"
+            
             self.add_error(f"Type error: logical operator requires booleans, got {left} and {right}", ctx)
             return "unknown"
 
@@ -167,64 +201,88 @@ class Visitor(CompiscriptVisitor):
     # Logical methods
 
     def visitLogicalOrExpr(self, ctx:CompiscriptParser.LogicalOrExprContext):
+        # Handle logical OR expressions (||)
         if ctx.getChildCount() == 3:
             left = self.visit(ctx.getChild(0))
             right = self.visit(ctx.getChild(2))
+
+
             if left == right == "boolean":
                 return "boolean"
+            
             self.add_error(f"Type error: logical operator requires booleans, got {left} and {right}", ctx)
+            
             return "unknown"
         
         return self.visit(ctx.getChild(0)) or "boolean"
 
     def visitUnaryExpr(self, ctx:CompiscriptParser.UnaryExprContext):
+        # Handle unary expressions (-, !)
         if ctx.getChildCount() == 2:
             operator = ctx.getChild(0).getText()
             operand = self.visit(ctx.getChild(1)) or "unknown"
 
+            # Allow negation for numbers
             if operator == "-" and operand in ["integer", "float"]:
                 return operand
+            
+            # Allow ! for booleans
             elif operator == "!" and operand == "boolean":
                 return "boolean"
+            
             else:
                 self.add_error(f"Type error: operator {operator} not valid for {operand}", ctx)
                 return "unknown"
+        
         return self.visit(ctx.getChild(0)) or "boolean"
     
     # Comparison methods
 
     def visitEqualityExpr(self, ctx:CompiscriptParser.EqualityExprContext):
+        # Handle equality expressions (==, !=, ===, !==)
         if ctx.getChildCount() == 3:
             left = self.visit(ctx.getChild(0))
             operator = ctx.getChild(1).getText()
             right = self.visit(ctx.getChild(2))
     
+            # Handle equality and strict equality. Based in JavaScript xd
             if operator in ["==", "!=", "===", "!=="]:
+                # Allow equality between same types
                 if left == right:
                     return "boolean"
+                
+                # Allow equality between integers and floats
                 elif left in ["integer", "float"] and right in ["integer", "float"]:
                     return "boolean"
+                
                 else:
                     self.add_error(f"Type error: cannot apply '{operator}' between {left} and {right}", ctx)
                     return "unknown"
+            
             else:
                 self.add_error(f"Unknown equality operator '{operator}'", ctx)
                 return "unknown"
+        
         else:    
             return self.visit(ctx.getChild(0)) or "boolean"
 
     def visitRelationalExpr(self, ctx:CompiscriptParser.RelationalExprContext):
+        # Handle relational expressions (<, >, <=, >=)
         if ctx.getChildCount() == 3:
             left = self.visit(ctx.getChild(0)) or "unknown"
             right = self.visit(ctx.getChild(2)) or "unknown"
             operator = ctx.getChild(1).getText()
 
+            # Handle relational/comparison operators
             if operator in ["<", ">", "<=", ">="]:
+                # Allow comparisons between integers and floats
                 if left in ["integer", "float"] and right in ["integer", "float"]:
                     return "boolean"
+                
                 else:
                     self.add_error(f"Type error: cannot compare {left} and {right} with {operator}", ctx)
                     return "unknown"
+                
             else:
                 self.add_error(f"Unknown relational operator '{operator}'", ctx)
                 return "unknown"
@@ -236,12 +294,17 @@ class Visitor(CompiscriptVisitor):
     # **************************
 
     def visitArrayLiteral(self, ctx:CompiscriptParser.ArrayLiteralContext):
+        # Handle array literal expressions
         if ctx.getChildCount() == 2:
             return "unknown[]"
 
+        # Get types of all elements in the array
         element_types = [self.visit(expr) for expr in ctx.expression()]
 
+        # Check for consistent element types
         first_type = element_types[0]
+
+        # If any type is unknown, return unknown[]
         for t in element_types[1:]:
             if t != first_type:
                 self.add_error(f"Type error: inconsistent types in array literal: {first_type} vs {t}", ctx)
@@ -250,18 +313,22 @@ class Visitor(CompiscriptVisitor):
         return f"{first_type}[]"
     
     def visitIndexExpr(self, ctx:CompiscriptParser.IndexExprContext):
+        # Handle array indexing expressions
         base = ctx.parentCtx.getChild(0)
 
         array_type = self.visit(base) or "unknown"
         index_type = self.visit(ctx.expression()) or "unknown"
 
+        # Check if base is an array
         if not array_type.endswith("[]"):
             self.add_error(f"Type error: trying to index non-array type '{array_type}'", ctx)
             return "unknown"
 
+        # Check if index is an integer
         if index_type != "integer":
             self.add_error(f"Type error: array index must be integer, got {index_type}", ctx)
 
+        # Return the element type of the array, removing one level of array
         return array_type.replace("[]", "", 1)
 
     # **********************************
@@ -269,66 +336,170 @@ class Visitor(CompiscriptVisitor):
     # **********************************
 
     def visitIfStatement(self, ctx:CompiscriptParser.IfStatementContext):
+        # Handle if statements
         cond_type = self.visit(ctx.expression())
+
+        # Allow only boolean conditions
         if cond_type != "boolean":
             self.add_error("Condition in 'if' must be boolean", ctx)
+        
         self.visit(ctx.block(0))  
         if ctx.block(1):          
             self.visit(ctx.block(1))
 
     def visitWhileStatement(self, ctx:CompiscriptParser.WhileStatementContext):
+        # Handle while statements
+        # Increase loop depth
         self.loop_depth += 1
+
         cond_type = self.visit(ctx.expression())
+        
+        # Allow only boolean conditions
         if cond_type != "boolean":
             self.add_error("Condition in 'while' must be boolean", ctx)
+    
         self.visit(ctx.block())
+        
+        # Decrease loop depth
         self.loop_depth -= 1
 
     def visitDoWhileStatement(self, ctx:CompiscriptParser.DoWhileStatementContext):
+        # Handle do-while statements
+        # Increase loop depth
         self.loop_depth += 1
+
         self.visit(ctx.block())
+        
         cond_type = self.visit(ctx.expression())
+        
+        # Allow only boolean conditions
         if cond_type != "boolean":
             self.add_error("Condition in 'do-while' must be boolean", ctx)
+        
+        # Decrease loop depth
         self.loop_depth -= 1
 
     def visitForStatement(self, ctx:CompiscriptParser.ForStatementContext):
+        # Handle for statements
+        # Increase loop depth
         self.loop_depth += 1
+
+        # Check initializer
         if ctx.variableDeclaration():
             self.visit(ctx.variableDeclaration())
+
+        # Check assignment
         elif ctx.assignment():
             self.visit(ctx.assignment())
 
+        # Check condition
         if ctx.expression(0):
             cond_type = self.visit(ctx.expression(0))
+
+            # Allow only boolean conditions
             if cond_type != "boolean":
                 self.add_error("Condition in 'for' must be boolean", ctx)
 
+        # Check increment/decrement
         if ctx.expression(1):
             self.visit(ctx.expression(1))
 
         self.visit(ctx.block())
+
+        # Decrease loop depth
         self.loop_depth -= 1
 
     def visitForeachStatement(self, ctx:CompiscriptParser.ForeachStatementContext):
+        # Handle foreach statements
+        # Increase loop depth
         self.loop_depth += 1
+        
         iterable_type = self.visit(ctx.expression())
+        
+        # Check if iterable is an array
         if not iterable_type.endswith("[]"):
             self.add_error("Foreach requires an array to iterate over", ctx)
             elem_type = "unknown"
+        
         else:
             elem_type = iterable_type.replace("[]", "", 1)
 
         var_name = ctx.Identifier().getText()
+
         self.symbol_table[var_name] = elem_type
+        
         self.visit(ctx.block())
+        
+        # Remove loop variable from symbol table
         del self.symbol_table[var_name]
+        
+        # Decrease loop depth
         self.loop_depth -= 1
 
     def visitBreakStatement(self, ctx):
+        # Handle break statements
         if self.loop_depth == 0: # If we are not inside a loop
             self.add_error("'break' used outside of loop", ctx)
 
     def visitContinueStatement(self, ctx):
-        if self.loop_depth == 0:
+        # Handle continue statements
+        if self.loop_depth == 0: # If we are not inside a loop
             self.add_error("'continue' used outside of loop", ctx)
+
+    # *************************
+    # *** Functions Methods ***
+    # *************************
+
+    def visitFunctionDeclaration(self, ctx:CompiscriptParser.FunctionDeclarationContext):
+        # Handle function declarations
+        func_name = ctx.Identifier().getText()
+        if func_name in self.symbol_table:
+            self.add_error(f"Function '{func_name}' already declared", ctx)
+            return self.visitChildren(ctx)
+
+        # Get return type
+        return_type = ctx.type_().getText() if ctx.type_() else "unknown"
+
+        # Get parameter types
+        param_types = {}
+        if ctx.parameters():
+            for param in ctx.parameters().parameter():
+                pname = param.Identifier().getText()
+                ptype = param.type_().getText() if param.type_() else "unknown"
+                param_types[pname] = ptype
+
+        self.symbol_table[func_name] = {
+            "type": return_type,
+            "params": param_types,
+            "const": True
+        }
+
+        # Create new scope for function parameters
+        old_symbols = self.symbol_table.copy()
+        for pname, ptype in param_types.items():
+            self.symbol_table[pname] = {"type": ptype, "const": False}
+
+        # Push function return type to stack
+        self.function_stack.append(return_type)
+
+        self.visit(ctx.block())
+
+        # Restore previous scope and function stack
+        self.symbol_table = old_symbols
+        self.function_stack.pop()
+
+    def visitReturnStatement(self, ctx:CompiscriptParser.ReturnStatementContext):
+        # Handle return statements
+        if not self.function_stack:
+            self.add_error("'return' used outside of function", ctx)
+            return "unknown"
+
+        expected_type = self.function_stack[-1]
+        expr_type = self.visit(ctx.expression()) if ctx.expression() else "void"
+
+        # Check return type consistency
+        if expected_type != "unknown" and expr_type != expected_type:
+            self.add_error(
+                f"Type error: function expects {expected_type} but got {expr_type}", ctx
+            )
+        return expr_type
