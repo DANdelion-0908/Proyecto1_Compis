@@ -5,6 +5,7 @@ class Visitor(CompiscriptVisitor):
     def __init__(self):
         self.symbol_table = {}
         self.errors = []  # Add errors list
+        self.loop_depth = 0  # Track loop depth for break/continue
 
     def add_error(self, message, ctx):
         line = ctx.start.line if ctx and ctx.start else "unknown"
@@ -276,18 +277,23 @@ class Visitor(CompiscriptVisitor):
             self.visit(ctx.block(1))
 
     def visitWhileStatement(self, ctx:CompiscriptParser.WhileStatementContext):
+        self.loop_depth += 1
         cond_type = self.visit(ctx.expression())
         if cond_type != "boolean":
             self.add_error("Condition in 'while' must be boolean", ctx)
         self.visit(ctx.block())
+        self.loop_depth -= 1
 
     def visitDoWhileStatement(self, ctx:CompiscriptParser.DoWhileStatementContext):
+        self.loop_depth += 1
         self.visit(ctx.block())
         cond_type = self.visit(ctx.expression())
         if cond_type != "boolean":
             self.add_error("Condition in 'do-while' must be boolean", ctx)
+        self.loop_depth -= 1
 
     def visitForStatement(self, ctx:CompiscriptParser.ForStatementContext):
+        self.loop_depth += 1
         if ctx.variableDeclaration():
             self.visit(ctx.variableDeclaration())
         elif ctx.assignment():
@@ -302,8 +308,10 @@ class Visitor(CompiscriptVisitor):
             self.visit(ctx.expression(1))
 
         self.visit(ctx.block())
+        self.loop_depth -= 1
 
     def visitForeachStatement(self, ctx:CompiscriptParser.ForeachStatementContext):
+        self.loop_depth += 1
         iterable_type = self.visit(ctx.expression())
         if not iterable_type.endswith("[]"):
             self.add_error("Foreach requires an array to iterate over", ctx)
@@ -315,3 +323,12 @@ class Visitor(CompiscriptVisitor):
         self.symbol_table[var_name] = elem_type
         self.visit(ctx.block())
         del self.symbol_table[var_name]
+        self.loop_depth -= 1
+
+    def visitBreakStatement(self, ctx):
+        if self.loop_depth == 0: # If we are not inside a loop
+            self.add_error("'break' used outside of loop", ctx)
+
+    def visitContinueStatement(self, ctx):
+        if self.loop_depth == 0:
+            self.add_error("'continue' used outside of loop", ctx)

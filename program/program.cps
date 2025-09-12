@@ -33,5 +33,6 @@ for (let xx: integer = 0; xx < 10; xx + 1) {
 }
 
 foreach (element in arr) {
+    break;
 
 }
