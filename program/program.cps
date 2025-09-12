@@ -35,12 +35,13 @@ foreach (element in arr) {
 
 }
 
-function movida(a: integer, b: integer, b: integer): integer {
+function movida(a: integer, b: integer): integer {
     let result = a + b;
-    
+    let hhh = a;
     return result;
 }
 
 let result = movida(1, arr[0]);
+let hhh = a;
 
 // AAAAAA
