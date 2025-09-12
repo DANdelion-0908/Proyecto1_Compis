@@ -41,4 +41,6 @@ function movida(a: integer, b: integer): integer {
     return result;
 }
 
-let result = movida();
+let result = movida(1, arr[0]);
+
+// AAAAAA
