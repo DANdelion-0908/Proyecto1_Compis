@@ -466,7 +466,18 @@ class Visitor(CompiscriptVisitor):
             for param in ctx.parameters().parameter():
                 pname = param.Identifier().getText()
                 ptype = param.type_().getText() if param.type_() else "unknown"
-                param_types[pname] = ptype
+
+                # Check for duplicate parameter names
+                if pname in param_types:
+                    self.add_error(f"Parameter '{pname}' already declared in function '{func_name}'", ctx)
+                
+                else:
+                    param_types[pname] = ptype
+        
+        # Check for duplicate function names
+        if func_name in self.symbol_table:
+            self.add_error(f"Function '{func_name}' already declared", ctx)
+            return self.visitChildren(ctx)
 
         self.symbol_table[func_name] = {
             "type": return_type,

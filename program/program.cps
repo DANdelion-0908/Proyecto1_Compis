@@ -35,7 +35,7 @@ foreach (element in arr) {
 
 }
 
-function movida(a: integer, b: integer): integer {
+function movida(a: integer, b: integer, b: integer): integer {
     let result = a + b;
     
     return result;
