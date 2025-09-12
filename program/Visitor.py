@@ -23,7 +23,7 @@ class Visitor(CompiscriptVisitor):
 
         # Check if the variable is declared
         if var_name not in self.symbol_table:
-            self.add_error(f"Variable '{var_name}' not declared.", ctx)
+            self.add_error(f"Variable '{var_name}' not declared", ctx)
             return "unknown"
         
         # Return the type of the variable
@@ -121,7 +121,7 @@ class Visitor(CompiscriptVisitor):
         var_name = ctx.Identifier().getText()
 
         if var_name not in self.symbol_table:
-            self.add_error(f"Variable '{var_name}' not declared.", ctx)
+            self.add_error(f"Variable '{var_name}' not declared", ctx)
             return self.visitChildren(ctx)
 
         var_info = self.symbol_table[var_name]
@@ -503,3 +503,50 @@ class Visitor(CompiscriptVisitor):
                 f"Type error: function expects {expected_type} but got {expr_type}", ctx
             )
         return expr_type
+
+    def visitCallExpr(self, ctx:CompiscriptParser.CallExprContext):
+        # Handle function call expressions
+        # Get the function name from the parent context (primaryAtom)
+        function_name = ctx.parentCtx.getChild(0).getText()
+        
+        # Check if the function is declared
+        if function_name not in self.symbol_table:
+            self.add_error(f"Function '{function_name}' not declared", ctx)
+            return "unknown"
+        
+        func_info = self.symbol_table[function_name]
+        
+        # Check if it's actually a function
+        if "params" not in func_info:
+            self.add_error(f"'{function_name}' is not a function", ctx)
+            return "unknown"
+        
+        # Get expected parameters
+        expected_params = func_info["params"]
+        expected_param_count = len(expected_params)
+        
+        # Get actual arguments
+        actual_args = []
+        if ctx.arguments():
+            actual_args = [self.visit(arg) for arg in ctx.arguments().expression()]
+        actual_arg_count = len(actual_args)
+        
+        # Check parameter count
+        if actual_arg_count != expected_param_count:
+            self.add_error(
+                f"Function '{function_name}' expects {expected_param_count} arguments but got {actual_arg_count}", 
+                ctx
+            )
+            return func_info["type"]
+        
+        # Check parameter types
+        expected_param_types = list(expected_params.values())
+        for i, (expected_type, actual_type) in enumerate(zip(expected_param_types, actual_args)):
+            if expected_type != actual_type:
+                self.add_error(
+                    f"Type error in argument {i+1}: expected {expected_type} but got {actual_type}", 
+                    ctx
+                )
+        
+        # Return the function's return type. Just in case.
+        return func_info["type"]
