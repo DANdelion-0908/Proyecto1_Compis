@@ -28,7 +28,7 @@ def index():
             if all_errors:
                 result = {"status": "error", "messages": all_errors}
             else:
-                result = {"status": "ok", "messages": ["Parser OK ✅"]}
+                result = {"status": "ok", "messages": ["OK"]}
                 symbol_table = parse_result["symbol_table"]
             
             image_url = "/static_result/" + os.path.basename(parse_result["image_path"])
