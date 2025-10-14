@@ -30,7 +30,7 @@ class Visitor(CompiscriptVisitor):
             return "boolean"
         else:
             raise Exception(f"Unknown literal: {text}")
-
+        
     def visitVariableDeclaration(self, ctx:CompiscriptParser.VariableDeclarationContext):
         var_name = ctx.Identifier().getText()
 
