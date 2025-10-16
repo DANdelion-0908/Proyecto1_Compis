@@ -1,11 +1,7 @@
-let c: integer = 5;
-
-let e: float = 5.5;
-
-let b: boolean = true;
-
-let a: integer = c / 1;
-
-let g: string = "aaa";
-
-const f: boolean = false;
+let x: integer = 5;
+let y: boolean = (x < 10 && x > 0);
+if (y || x > 3) {
+    x = 1;
+} else {
+    x = 2;
+}

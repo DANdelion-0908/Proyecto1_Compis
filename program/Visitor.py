@@ -65,7 +65,10 @@ class Visitor(CompiscriptVisitor):
             return self.visitChildren(ctx)
 
         declared_type = ctx.typeAnnotation().getText().replace(":", "").strip()
-        expression: CodeFragment = self.visit(ctx.initializer().expression())
+        expression = self.visit(ctx.initializer().expression())
+
+        if isinstance(expression, str):
+            expression: CodeFragment = CodeFragment([], expression, expression)
 
         # Check initializer type and compare with declared type
         if ctx.initializer():
@@ -142,10 +145,21 @@ class Visitor(CompiscriptVisitor):
             self.add_error(f"Reassignment to constant '{var_name}' is not allowed.", ctx)
             return CodeFragment([], None, "unknown")
 
-        expression: CodeFragment = self.visit(ctx.expression())
+        expression: CodeFragment = ctx.expression()
+
+        if isinstance(expression, list):
+            if len(expression) == 1:
+                expression = expression[0]
+
+            else:
+                self.add_error(f"Unexpected multiple expressions in assigment to {var_name}", ctx)
+                return CodeFragment([], None, "unknown")
+
+        expression: CodeFragment = self.visit(expression)
 
         if expression.type != var_info["type"]:
             self.add_error(f"Type mismatch: variable '{var_name}' declared as {var_info['type']} but initialized with {expression.type}", ctx)
+            return CodeFragment([], None, "unknown")
 
         code = expression.code + [f"{var_name} = {expression.place}"]
         return CodeFragment(code, var_name, expression.type)
@@ -239,7 +253,12 @@ class Visitor(CompiscriptVisitor):
             code = left.code + right.code + [f"{temp} = {left.place} && {right.place}"]
             return CodeFragment(code, temp, "boolean")
 
-        return self.visit(ctx.getChild(0))
+        else:
+            result = self.visit(ctx.getChild(0))
+            if not result:
+                result = CodeFragment([], None, "boolean")
+
+            return result
 
     def visitLogicalOrExpr(self, ctx:CompiscriptParser.LogicalOrExprContext):
         # Handle logical OR expressions (||)
@@ -259,8 +278,14 @@ class Visitor(CompiscriptVisitor):
             
             temp = self.cg.new_temp()
             code = left.code + right.code + [f"{temp} = {left.place} || {right.place}"]
-        
-        return self.visit(ctx.getChild(0)) or "boolean"
+            return CodeFragment(code, temp, "boolean")
+
+        else:
+            result = self.visit(ctx.getChild(0))
+            if not result:
+                result = CodeFragment([], None, "boolean")
+
+            return result
 
     def visitUnaryExpr(self, ctx:CompiscriptParser.UnaryExprContext):
         # Handle unary expressions (-, !)
@@ -295,29 +320,33 @@ class Visitor(CompiscriptVisitor):
         # Handle equality expressions (==, !=, ===, !==)
         if ctx.getChildCount() == 3:
             left = self.visit(ctx.getChild(0))
-            operator = ctx.getChild(1).getText()
             right = self.visit(ctx.getChild(2))
+            operator = ctx.getChild(1).getText()
+
+            if isinstance(left, str):
+                left = CodeFragment([], left, left)
+
+            if isinstance(right, str):
+                right = CodeFragment([], right, right)
     
             # Handle equality and strict equality. Based in JavaScript xd
             if operator in ["==", "!=", "===", "!=="]:
                 # Allow equality between same types
-                if left == right:
-                    return "boolean"
-                
-                # Allow equality between integers and floats
-                elif left in ["integer", "float"] and right in ["integer", "float"]:
-                    return "boolean"
+                if left.type == right.type or (left in ["integer", "float"] and right in ["integer", "float"]):
+                    temp = self.cg.new_temp()
+                    code = left.code + right.code + [f"{temp} = {left.place} {operator} {right.place}"]
+                    return CodeFragment(code, temp, "boolean")
                 
                 else:
                     self.add_error(f"Type error: cannot apply '{operator}' between {left} and {right}", ctx)
-                    return "unknown"
+                    return CodeFragment([], None, "unknown")
             
             else:
                 self.add_error(f"Unknown equality operator '{operator}'", ctx)
-                return "unknown"
+                return CodeFragment([], None, "unknown")
         
         else:    
-            return self.visit(ctx.getChild(0)) or "boolean"
+            return self.visit(ctx.getChild(0)) or CodeFragment([], None, "boolean")
 
     def visitRelationalExpr(self, ctx:CompiscriptParser.RelationalExprContext):
         # Handle relational expressions (<, >, <=, >=)
@@ -326,21 +355,29 @@ class Visitor(CompiscriptVisitor):
             right = self.visit(ctx.getChild(2)) or "unknown"
             operator = ctx.getChild(1).getText()
 
+            if isinstance(left, str):
+                left = CodeFragment([], left, left)
+
+            if isinstance(right, str):
+                right = CodeFragment([], right, right)
+
             # Handle relational/comparison operators
             if operator in ["<", ">", "<=", ">="]:
                 # Allow comparisons between integers and floats
-                if left in ["integer", "float"] and right in ["integer", "float"]:
-                    return "boolean"
+                if left.type in ["integer", "float"] and right.type in ["integer", "float"]:
+                    temp = self.cg.new_temp()
+                    code = left.code + right.code + [f"{temp} = {left.place} {operator} {right.place}"]
+                    return CodeFragment(code, temp, "boolean")
                 
                 else:
-                    self.add_error(f"Type error: cannot compare {left} and {right} with {operator}", ctx)
-                    return "unknown"
+                    self.add_error(f"Type error: cannot compare {left.type} and {right.type} with {operator}", ctx)
+                    return CodeFragment([], None, "unknown")
                 
             else:
                 self.add_error(f"Unknown relational operator '{operator}'", ctx)
-                return "unknown"
+                return CodeFragment([], None, "unknown")
 
-        return self.visit(ctx.getChild(0)) or "boolean"
+        return self.visit(ctx.getChild(0)) or CodeFragment([], None, "boolean")
     
     # **************************
     # *** Structures Methods ***
@@ -349,40 +386,61 @@ class Visitor(CompiscriptVisitor):
     def visitArrayLiteral(self, ctx:CompiscriptParser.ArrayLiteralContext):
         # Handle array literal expressions
         if ctx.getChildCount() == 2:
-            return "unknown[]"
+            return CodeFragment([], None, "unknown[]")
 
         # Get types of all elements in the array
-        element_types = [self.visit(expr) for expr in ctx.expression()]
+        elements = ctx.expression()
+
+        if not elements:
+            # Empty array initialization
+            temp = self.cg.new_temp()
+            return CodeFragment([f"{temp} = []", temp, "unknown[]"])
 
         # Check for consistent element types
-        first_type = element_types[0]
+        element_fragments: list[CodeFragment] = [self.visit(expr) for expr in elements]
+        first_type = element_fragments[0].type
 
         # If any type is unknown, return unknown[]
-        for t in element_types[1:]:
-            if t != first_type:
-                self.add_error(f"Type error: inconsistent types in array literal: {first_type} vs {t}", ctx)
-                return "unknown[]"
+        for element in element_fragments[1:]:
+            if element.type != first_type:
+                self.add_error(f"Type error: inconsistent types in array literal: found {first_type} instead of {element.type}", ctx)
+                return CodeFragment([], None, "unknown[]")
+            
+        temp = self.cg.new_temp()
+        code = [f"{temp} = []"]
 
-        return f"{first_type}[]"
+        for element in element_fragments:
+            code += element.code + [f"push({temp}, {element.place})"]
+
+        return CodeFragment(code, temp, f"{first_type}[]")
     
     def visitIndexExpr(self, ctx:CompiscriptParser.IndexExprContext):
         # Handle array indexing expressions
-        base = ctx.parentCtx.getChild(0)
+        base_name = ctx.parentCtx.getChild(0).getText()
 
-        array_type = self.visit(base) or "unknown"
-        index_type = self.visit(ctx.expression()) or "unknown"
+        # Check if array is in symbol table
+        if base_name not in self.symbol_table:
+            self.add_error(f"Variable '{base_name}' not declared", ctx)
+            return CodeFragment([], None, "unknown")
+        
+        base_info = self.symbol_table[base_name]
+        base_type = base_info["type"]
+        index = self.visit(ctx.expression())
 
         # Check if base is an array
-        if not array_type.endswith("[]"):
-            self.add_error(f"Type error: trying to index non-array type '{array_type}'", ctx)
-            return "unknown"
+        if not base_type.endswith("[]"):
+            self.add_error(f"Type error: '{base_name}' is not an array", ctx)
+            return CodeFragment([], None, "unknown")
 
         # Check if index is an integer
-        if index_type != "integer":
-            self.add_error(f"Type error: array index must be integer, got {index_type}", ctx)
+        if index.type != "integer":
+            self.add_error(f"Type error: array index must be integer, got {index.type}", ctx)
+            return CodeFragment([], None, "unknown")
 
-        # Return the element type of the array, removing one level of array
-        return array_type.replace("[]", "", 1)
+        element_type = base_type.replace("[]", "", 1)
+        temp = self.cg.new_temp()
+        code = index.code + [f"{temp} = {base_name}[{index.place}]"]
+        return CodeFragment(code, temp, element_type)
 
     # **********************************
     # *** Control Structures Methods ***
@@ -390,25 +448,51 @@ class Visitor(CompiscriptVisitor):
 
     def visitIfStatement(self, ctx:CompiscriptParser.IfStatementContext):
         # Handle if statements
-        cond_type = self.visit(ctx.expression())
+        condition: CodeFragment = self.visit(ctx.expression())
 
         # Allow only boolean conditions
-        if cond_type != "boolean":
+        if condition.type != "boolean":
             self.add_error("Condition in 'if' must be boolean", ctx)
+            return CodeFragment([], None, "unknown")
         
-        self.visit(ctx.block(0))  
-        if ctx.block(1):          
-            self.visit(ctx.block(1))
+        # Get then and else blocks
+        thenBlock: CodeFragment = self.visit(ctx.block(0))
+        # Else block can be None
+        elseBlock: CodeFragment | None = self.visit(ctx.block(1)) if ctx.block(1) else None
+
+        elseLabel = self.cg.new_label()
+        endLabel = self.cg.new_label()
+
+        code = condition.code
+        code.append(f"if False {condition.place} goto {elseLabel}")
+        code += thenBlock.code
+        code.append(f"goto {endLabel}")
+        code.append(f"{elseLabel}")
+
+        if elseBlock:
+            code += elseBlock.code
+        
+        code.append(f"{endLabel}")
+        
+        return CodeFragment(code, None, "void")
+    
+    def visitBlock(self, ctx: CompiscriptParser.BlockContext):
+        code = []
+        for stmt in ctx.statement():
+            frag = self.visit(stmt)
+            if isinstance(frag, CodeFragment):
+                code.extend(frag.code)
+        return CodeFragment(code, None, "void")
 
     def visitWhileStatement(self, ctx:CompiscriptParser.WhileStatementContext):
         # Handle while statements
         # Increase loop depth
         self.loop_depth += 1
 
-        cond_type = self.visit(ctx.expression())
+        condition = self.visit(ctx.expression())
         
         # Allow only boolean conditions
-        if cond_type != "boolean":
+        if condition != "boolean":
             self.add_error("Condition in 'while' must be boolean", ctx)
     
         self.visit(ctx.block())
