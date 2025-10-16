@@ -183,6 +183,8 @@ class Visitor(CompiscriptVisitor):
             
         return self.visit(ctx.getChild(0))
     
+    # Logical methods
+
     def visitLogicalAndExpr(self, ctx:CompiscriptParser.LogicalAndExprContext):
         # Handle logical AND expressions (&&)
         if ctx.getChildCount() == 3:
@@ -197,8 +199,6 @@ class Visitor(CompiscriptVisitor):
             return "unknown"
 
         return self.visit(ctx.getChild(0)) or "boolean"
-
-    # Logical methods
 
     def visitLogicalOrExpr(self, ctx:CompiscriptParser.LogicalOrExprContext):
         # Handle logical OR expressions (||)
