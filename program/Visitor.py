@@ -65,16 +65,17 @@ class Visitor(CompiscriptVisitor):
             return self.visitChildren(ctx)
 
         declared_type = ctx.typeAnnotation().getText().replace(":", "").strip()
+        expression: CodeFragment = self.visit(ctx.initializer().expression())
 
         # Check initializer type and compare with declared type
         if ctx.initializer():
-            expression: CodeFragment = self.visit(ctx.initializer().expression())
+            if expression and declared_type and declared_type != expression.type:
+                decl_t = declared_type if isinstance(declared_type, str) else None
+                expr_t = expression.type if isinstance(expression.type, str) else None
 
-            if declared_type and declared_type != expression.type:
-                # Handle arrays specifically
-                if declared_type.endswith("[]") and expression.type.endswith("[]"):
-                    elem_decl = declared_type.replace("[]", "")
-                    elem_init = expression.type.replace("[]", "")
+                if decl_t and expr_t and decl_t.endswith("[]") and expr_t.endswith("[]"):
+                    elem_decl = decl_t.replace("[]", "")
+                    elem_init = expr_t.replace("[]", "")
                     if elem_decl != elem_init:
                         self.add_error(f"Type error: variable '{var_name}' declared as {declared_type} but initialized with {expression.type}", ctx)
                 # Handle type errors
@@ -92,8 +93,9 @@ class Visitor(CompiscriptVisitor):
 
         if expression:
             code = expression.code + [f"{var_name} = {expression.place}"]
+            return CodeFragment(code, var_name, expression.type)
         
-        return CodeFragment(code, var_name, expression.type)
+        return CodeFragment([], None, "unknown")
 
     def visitConstantDeclaration(self, ctx:CompiscriptParser.ConstantDeclarationContext):
         # Handle constant declarations
@@ -105,21 +107,25 @@ class Visitor(CompiscriptVisitor):
 
         declared_type = ctx.typeAnnotation().type_().getText() if ctx.typeAnnotation() else None
 
-        init_type = self.visit(ctx.expression())
+        expression: CodeFragment = self.visit(ctx.expression())
 
         # Check type consistency for constants
-        if declared_type and declared_type != init_type:
+        if expression and declared_type and declared_type != expression.type:
                 if declared_type in ["integer", "float", "string", "boolean"]:
-                    self.add_error(f"Type error: constant '{const_name}' declared as {declared_type} but initialized with a different type.", ctx)
+                    self.add_error(f"Type error: constant '{const_name}' declared as {declared_type} but initialized with {expression.type}.", ctx)
                 else:
                     self.add_error(f"Type error: type '{declared_type}' not recognized.", ctx)
 
         self.symbol_table[const_name] = {
-            "type": declared_type if declared_type else init_type,
+            "type": declared_type if declared_type else expression.type,
             "const": True
         }
 
-        return self.visitChildren(ctx)
+        if expression:
+            code = expression.code + [f"{const_name} = {expression.place}"]
+            return CodeFragment(code, const_name, expression.type)
+        
+        return CodeFragment([], None, "unknown")
 
     def visitAssignment(self, ctx:CompiscriptParser.AssignmentContext):
         # Handle assignment statements
@@ -139,7 +145,7 @@ class Visitor(CompiscriptVisitor):
         expression: CodeFragment = self.visit(ctx.expression())
 
         if expression.type != var_info["type"]:
-            self.add_error(f"Type mismatch: variable '{var_name}' declared as {var_info["type"]} but initialized with {expression.type}")
+            self.add_error(f"Type mismatch: variable '{var_name}' declared as {var_info['type']} but initialized with {expression.type}", ctx)
 
         code = expression.code + [f"{var_name} = {expression.place}"]
         return CodeFragment(code, var_name, expression.type)
@@ -218,14 +224,22 @@ class Visitor(CompiscriptVisitor):
             left = self.visit(ctx.getChild(0))
             right = self.visit(ctx.getChild(2))
 
-            # Check both sides are boolean
-            if left == right == "boolean":
-                return "boolean"
-            
-            self.add_error(f"Type error: logical operator requires booleans, got {left} and {right}", ctx)
-            return "unknown"
+            if isinstance(left, str):
+                left = CodeFragment([], left, left)
 
-        return self.visit(ctx.getChild(0)) or "boolean"
+            if isinstance(right, str):
+                right = CodeFragment([], right, right)
+
+            # Check both sides are boolean
+            if left.type != "boolean" or right.type != "boolean":
+                self.add_error(f"Type error: logical operator requires booleans, got {left} and {right}", ctx)
+                return CodeFragment([], None, "unknown")
+            
+            temp = self.cg.new_temp()
+            code = left.code + right.code + [f"{temp} = {left.place} && {right.place}"]
+            return CodeFragment(code, temp, "boolean")
+
+        return self.visit(ctx.getChild(0))
 
     def visitLogicalOrExpr(self, ctx:CompiscriptParser.LogicalOrExprContext):
         # Handle logical OR expressions (||)
@@ -233,13 +247,18 @@ class Visitor(CompiscriptVisitor):
             left = self.visit(ctx.getChild(0))
             right = self.visit(ctx.getChild(2))
 
+            if isinstance(left, str):
+                left = CodeFragment([], left, left)
 
-            if left == right == "boolean":
-                return "boolean"
+            if isinstance(right, str):
+                right = CodeFragment([], right, right)
+
+            if left.type != "boolean" or right.type != "boolean":
+                self.add_error(f"Type error: logical operator requires booleans, got {left} and {right}", ctx)
+                return CodeFragment([], None, "unknown")
             
-            self.add_error(f"Type error: logical operator requires booleans, got {left} and {right}", ctx)
-            
-            return "unknown"
+            temp = self.cg.new_temp()
+            code = left.code + right.code + [f"{temp} = {left.place} || {right.place}"]
         
         return self.visit(ctx.getChild(0)) or "boolean"
 
@@ -247,21 +266,28 @@ class Visitor(CompiscriptVisitor):
         # Handle unary expressions (-, !)
         if ctx.getChildCount() == 2:
             operator = ctx.getChild(0).getText()
-            operand = self.visit(ctx.getChild(1)) or "unknown"
+            operand = self.visit(ctx.getChild(1))
+
+            if isinstance(operand, str):
+                operand = CodeFragment([], operand, operand)
 
             # Allow negation for numbers
-            if operator == "-" and operand in ["integer", "float"]:
-                return operand
+            if operator == "-" and operand.type in ["integer", "float"]:
+                temp = self.cg.new_temp()
+                code = operand.code + [f"{temp} = -{operand.place}"]
+                return CodeFragment(code, temp, operand.type)
             
             # Allow ! for booleans
-            elif operator == "!" and operand == "boolean":
-                return "boolean"
+            elif operator == "!" and operand.type == "boolean":
+                temp = self.cg.new_temp()
+                code = operand.code + [f"{temp} = !{operand.place}"]
+                return CodeFragment(code, temp, operand.type)
             
             else:
-                self.add_error(f"Type error: operator {operator} not valid for {operand}", ctx)
-                return "unknown"
+                self.add_error(f"Type error: operator {operator} not valid for {operand.type}", ctx)
+                return CodeFragment([], None, "unknown")
         
-        return self.visit(ctx.getChild(0)) or "boolean"
+        return self.visit(ctx.getChild(0))
     
     # Comparison methods
 
