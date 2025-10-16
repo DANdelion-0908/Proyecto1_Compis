@@ -39,7 +39,6 @@ def tree_to_graph(tree, rule_names, graph=None, parent=None, count=[0]):
 
     return graph
 
-
 def parse_text(code: str):
     input_stream = InputStream(code)
     lexer = CompiscriptLexer(input_stream)

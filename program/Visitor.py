@@ -1,5 +1,7 @@
 from CompiscriptParser import CompiscriptParser
 from CompiscriptVisitor import CompiscriptVisitor
+from CodeFragment import CodeFragment
+from CodeGenerator import CodeGenerator
 
 class Visitor(CompiscriptVisitor):
     def __init__(self):
@@ -7,6 +9,7 @@ class Visitor(CompiscriptVisitor):
         self.errors = []  # List to store semantic errors
         self.loop_depth = 0  # Track loop depth for break/continue statements
         self.function_stack = []  # Track function context for return type checking
+        self.cg = CodeGenerator()  # Generation of temporal code with format t or L
 
     def add_error(self, message, ctx):
         # Add an error message with line information to the errors list
@@ -24,10 +27,12 @@ class Visitor(CompiscriptVisitor):
         # Check if the variable is declared
         if var_name not in self.symbol_table:
             self.add_error(f"Variable '{var_name}' not declared", ctx)
-            return "unknown"
+            return CodeFragment([], None, "unknown")
+        
+        var_type = self.symbol_table[var_name]["type"]
         
         # Return the type of the variable
-        return self.symbol_table[var_name]['type']
+        return CodeFragment([], var_name, var_type)
 
     def visitLiteralExpr(self, ctx:CompiscriptParser.LiteralExprContext):
         # Handle literal expressions (numbers, strings, booleans, arrays)
@@ -39,16 +44,16 @@ class Visitor(CompiscriptVisitor):
 
         # Determine the type of the literal
         if text.isdigit():
-            return "integer"
+            return CodeFragment([], text, "integer")
         elif text.replace('.', '', 1).isdigit() and text.count('.') < 2:
-            return "float"
+            return CodeFragment([], text, "float")
         elif text.startswith('"') and text.endswith('"'):
-            return "string"
-        elif text == "true" or text == "false":
-            return "boolean"
+            return CodeFragment([], text, "string")
+        elif text in ["true", "false"]:
+            return CodeFragment([], text, "boolean")
         else:
             self.add_error(f"Unknown literal: {text}", ctx)
-            return "unknown"
+        return CodeFragment([], None, "unknown")
 
     def visitVariableDeclaration(self, ctx:CompiscriptParser.VariableDeclarationContext):
         # Handle variable declarations
@@ -59,36 +64,36 @@ class Visitor(CompiscriptVisitor):
             self.add_error(f"Variable '{var_name}' already declared.", ctx)
             return self.visitChildren(ctx)
 
-        declared_type = None
-
-        # Check for type annotation
-        if ctx.typeAnnotation():
-            declared_type = ctx.typeAnnotation().getText().replace(":", "").strip()
+        declared_type = ctx.typeAnnotation().getText().replace(":", "").strip()
 
         # Check initializer type and compare with declared type
         if ctx.initializer():
-            init_type = self.visit(ctx.initializer().expression())
-            if declared_type and declared_type != init_type:
+            expression: CodeFragment = self.visit(ctx.initializer().expression())
+
+            if declared_type and declared_type != expression.type:
                 # Handle arrays specifically
-                if declared_type.endswith("[]") and init_type.endswith("[]"):
+                if declared_type.endswith("[]") and expression.type.endswith("[]"):
                     elem_decl = declared_type.replace("[]", "")
-                    elem_init = init_type.replace("[]", "")
+                    elem_init = expression.type.replace("[]", "")
                     if elem_decl != elem_init:
-                        self.add_error(f"Type error: variable '{var_name}' declared as {declared_type} but initialized with {init_type}", ctx)
+                        self.add_error(f"Type error: variable '{var_name}' declared as {declared_type} but initialized with {expression.type}", ctx)
                 # Handle type errors
-                elif declared_type != init_type:
-                    self.add_error(f"Type error: variable '{var_name}' declared as {declared_type} but initialized with {init_type}", ctx)
+                elif declared_type != expression.type:
+                    self.add_error(f"Type error: variable '{var_name}' declared as {declared_type} but initialized with {expression.type}", ctx)
 
             # Use initializer type if no declared type
-            declared_type = declared_type or init_type
+            declared_type = declared_type or expression.type
 
         # Store variable in symbol table
         self.symbol_table[var_name] = {
             "type": declared_type or "unknown",
             "const": False
-            }
+        }
+
+        if expression:
+            code = expression.code + [f"{var_name} = {expression.place}"]
         
-        return self.visitChildren(ctx)
+        return CodeFragment(code, var_name, expression.type)
 
     def visitConstantDeclaration(self, ctx:CompiscriptParser.ConstantDeclarationContext):
         # Handle constant declarations
@@ -122,23 +127,22 @@ class Visitor(CompiscriptVisitor):
 
         if var_name not in self.symbol_table:
             self.add_error(f"Variable '{var_name}' not declared", ctx)
-            return self.visitChildren(ctx)
+            return CodeFragment([], None, "unknown")
 
         var_info = self.symbol_table[var_name]
 
         # Prevent reassignment to constants
-        if isinstance(var_info, dict) and var_info.get("const", False):
+        if var_info.get("const", False):
             self.add_error(f"Reassignment to constant '{var_name}' is not allowed.", ctx)
-            return self.visitChildren(ctx)
+            return CodeFragment([], None, "unknown")
 
-        assigned_type = self.visit(ctx.expression())
-        declared_type = var_info["type"] if isinstance(var_info, dict) else var_info
+        expression: CodeFragment = self.visit(ctx.expression())
 
-        # Check type consistency for assignments
-        if declared_type != assigned_type:
-            self.add_error(f"Type error: variable '{var_name}' is {declared_type} but assigned {assigned_type}", ctx)
+        if expression.type != var_info["type"]:
+            self.add_error(f"Type mismatch: variable '{var_name}' declared as {var_info["type"]} but initialized with {expression.type}")
 
-        return self.visitChildren(ctx)
+        code = expression.code + [f"{var_name} = {expression.place}"]
+        return CodeFragment(code, var_name, expression.type)
     
     # **************************
     # *** Expression Methods ***
@@ -148,6 +152,8 @@ class Visitor(CompiscriptVisitor):
         # Handle expression statements
         return self.visit(ctx.expression())
 
+    # Arithmetic methods
+
     def visitAdditiveExpr(self, ctx:CompiscriptParser.AdditiveExprContext):
         # Handle additive expressions (+, -)
         if ctx.getChildCount() == 3:
@@ -155,34 +161,55 @@ class Visitor(CompiscriptVisitor):
             right = self.visit(ctx.getChild(2))
             operator = ctx.getChild(1).getText()
 
+            if isinstance(left, str):
+                left = CodeFragment([], left, left)
+            
+            if isinstance(right, str):
+                right = CodeFragment([], right, right)
+
             # Allow operations between integers and floats
-            if left in ["integer", "float"] and right in ["integer", "float"]:
-                return "float" if "float" in (left, right) else "integer"
+            if left.type in ["integer", "float"] and right.type in ["integer", "float"]:
+                result_type = "float" if "float" in (left.type, right.type) else "integer"
             
             else:
-                self.add_error(f"Type error while evaluating {left} {operator} {right}", ctx)
-                return "unknown"
+                self.add_error(f"Type error while evaluating {left.type} {operator} {right.type}", ctx)
+                return CodeFragment([], None, "unknown")
+            
+            temp = self.cg.new_temp()
+            code = left.code + right.code + [f"{temp} = {left.place} {operator} {right.place}"]
+            return CodeFragment(code, temp, result_type)
             
         else:
             return self.visit(ctx.getChild(0))
-
-    # Arithmetic methods
 
     def visitMultiplicativeExpr(self, ctx:CompiscriptParser.MultiplicativeExprContext):
         # Handle multiplicative expressions (*, /, %)
         if ctx.getChildCount() == 3:
             left = self.visit(ctx.getChild(0))
             right = self.visit(ctx.getChild(2))
+            operator = ctx.getChild(1).getText()
+
+            if isinstance(left, str):
+                left = CodeFragment([], left, left)
+            
+            if isinstance(right, str):
+                right = CodeFragment([], right, right)
 
             # Allow operations between integers and floats
-            if left in ["integer", "float"] and right in ["integer", "float"]:
-                return "float" if "float" in (left, right) else "integer"
+            if left.type in ["integer", "float"] and right.type in ["integer", "float"]:
+                result_type = "float" if "float" in (left, right) else "integer"
+
             else:
-                self.add_error(f"Type error: cannot apply {ctx.getChild(1).getText()} to {left} and {right}", ctx)
-                return "unknown"
+                self.add_error(f"Type error: cannot apply {operator} to {left.type} and {right.type}", ctx)
+                return CodeFragment([], None, "unknown")
             
-        return self.visit(ctx.getChild(0))
-    
+            temp = self.cg.new_temp()
+            code = left.code + right.code + [f"{temp} = {left.place} {operator} {right.place}"]
+            return CodeFragment(code, temp, result_type)
+        
+        else:
+            return self.visit(ctx.getChild(0))
+
     # Logical methods
 
     def visitLogicalAndExpr(self, ctx:CompiscriptParser.LogicalAndExprContext):
@@ -561,3 +588,15 @@ class Visitor(CompiscriptVisitor):
         
         # Return the function's return type. Just in case.
         return func_info["type"]
+    
+    def visitProgram(self, ctx:CompiscriptParser.ProgramContext):
+        print("Aquí estamos")
+        code = []
+        
+        for stmt in ctx.statement():
+            frag = self.visit(stmt)
+
+            if isinstance(frag, CodeFragment):
+                code.extend(frag.code)
+
+        print("\n".join(code))
