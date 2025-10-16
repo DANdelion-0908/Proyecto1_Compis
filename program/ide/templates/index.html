@@ -1,34 +1,76 @@
 <!doctype html>
 <html>
-<head>
-  <meta charset="utf-8" />
-  <title>MyLang</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 2rem; }
-    textarea { width: 100%; height: 260px; font-family: monospace; }
-    .ok { color: #0a7d00; }
-    .error { color: #b00020; }
-    pre { background: #f6f8fa; padding: 1rem; overflow: auto; }
-    button { padding: .6rem 1rem; }
-    table { border-collapse: collapse; margin: 1rem 0; }
-    th, td { border: 1px solid #ddd; padding: 8px; }
-    th { background-color: #f2f2f2; }
-  </style>
+  <head>
+    <meta charset="utf-8" />
+    <title>MyLang</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem;}
+      textarea { width: 100%; height: 260px; font-family: monospace; }
+      .ok { color: #0a7d00; }
+      .error { color: #b00020; }
+      pre { background: #f6f8fa; padding: 1rem; overflow: auto; }
+      button { padding: .6rem 1rem; margin-right: 8px; }
+      table { border-collapse: collapse; margin: 1rem 0; }
+      th, td { border: 1px solid #ddd; padding: 8px; }
+      th { background-color: #f2f2f2; }
+      .main-container {
+        display: flex;
+        gap: 2rem;
+        margin-top: 1rem;
+      }
+      .code-section {
+        flex: 1;
+      }
+      .symbols-section {
+        flex: 1;
+      }
+      .file-input-container {
+        margin-bottom: 1rem;
+      }
+      #fileInput {
+        margin-bottom: 0.5rem;
+      }
+    </style>
 </head>
 <body>
   <h1>MyLang</h1>
-  <form method="post">
-    <textarea name="code" placeholder="Escribe tu código aquí...">{{ code if code }}</textarea>
+  
+  <div class="file-input-container">
+    <input type="file" id="fileInput" accept=".txt,.ml,.mylang">
+    <button onclick="loadFile()">Cargar Archivo</button>
+  </div>
+  
+  <form method="post" id="compilerForm">
+    <textarea name="code" id="codeTextarea" placeholder="Escribe tu código aquí...">{{ code if code }}</textarea>
     <div style="margin-top: 8px;">
       <button type="submit">Compilar</button>
+      <button type="button" onclick="clearCode()">Limpiar</button>
     </div>
   </form>
 
-  {% if result %}
-    <h2>Resultado</h2>
-    {% if result.status == 'ok' %}
-      <p class="ok">{{ result.messages[0] }}</p>
-      
+  <div class="main-container">
+    <div class="code-section">
+      {% if result %}
+        <h2>Resultado</h2>
+        {% if result.status == 'ok' %}
+          <p class="ok">{{ result.messages[0] }}</p>
+        {% else %}
+          <ul class="error">
+            {% for m in result.messages %}
+              <li>{{ m }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      {% endif %}
+
+      {% if image_url %}
+        <h3>Árbol de sintaxis generado:</h3>
+        <img src="{{ image_url }}" alt="Parse Tree" style="max-width:100%; border:1px solid #ccc;"/>
+      {% endif %}
+    </div>
+
+    <div class="symbols-section">
       {% if symbol_table %}
         <h3>Tabla de Símbolos</h3>
         <table>
@@ -46,19 +88,45 @@
           {% endfor %}
         </table>
       {% endif %}
-      
-    {% else %}
-      <ul class="error">
-        {% for m in result.messages %}
-          <li>{{ m }}</li>
-        {% endfor %}
-      </ul>
-    {% endif %}
-  {% endif %}
+    </div>
+  </div>
 
-  {% if image_url %}
-    <h3>Árbol de sintaxis generado:</h3>
-    <img src="{{ image_url }}" alt="Parse Tree" style="max-width:100%; border:1px solid #ccc;"/>
-  {% endif %}
+  <script>
+    // Función para cargar archivo al textarea
+    function loadFile() {
+      const fileInput = document.getElementById('fileInput');
+      const file = fileInput.files[0];
+      
+      if (file) {
+        const reader = new FileReader();
+        
+        reader.onload = function(e) {
+          document.getElementById('codeTextarea').value = e.target.result;
+        };
+        
+        reader.readAsText(file);
+      } else {
+        alert('Por favor, selecciona un archivo primero.');
+      }
+    }
+    
+    // Función para limpiar el código
+    function clearCode() {
+      document.getElementById('codeTextarea').value = '';
+    }
+    
+    // Guardar el contenido del textarea en localStorage antes de enviar el formulario
+    document.getElementById('compilerForm').addEventListener('submit', function() {
+      localStorage.setItem('savedCode', document.getElementById('codeTextarea').value);
+    });
+    
+    // Restaurar el contenido del textarea desde localStorage al cargar la página
+    window.addEventListener('load', function() {
+      const savedCode = localStorage.getItem('savedCode');
+      if (savedCode) {
+        document.getElementById('codeTextarea').value = savedCode;
+      }
+    });
+  </script>
 </body>
 </html>
