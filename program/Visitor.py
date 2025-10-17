@@ -64,7 +64,7 @@ class Visitor(CompiscriptVisitor):
             self.add_error(f"Variable '{var_name}' already declared.", ctx)
             return self.visitChildren(ctx)
 
-        declared_type = ctx.typeAnnotation().getText().replace(":", "").strip()
+        declared_type = ctx.typeAnnotation().getText().replace(":", "").strip() if ctx.typeAnnotation() else None
         expression = self.visit(ctx.initializer().expression())
 
         if isinstance(expression, str):
@@ -85,8 +85,8 @@ class Visitor(CompiscriptVisitor):
                 elif declared_type != expression.type:
                     self.add_error(f"Type error: variable '{var_name}' declared as {declared_type} but initialized with {expression.type}", ctx)
 
-            # Use initializer type if no declared type
-            declared_type = declared_type or expression.type
+            else:
+                declared_type = expression.type
 
         # Store variable in symbol table
         self.symbol_table[var_name] = {
@@ -95,8 +95,9 @@ class Visitor(CompiscriptVisitor):
         }
 
         if expression:
-            code = expression.code + [f"{var_name} = {expression.place}"]
-            return CodeFragment(code, var_name, expression.type)
+            # Use initializer type if no declared type
+            code = expression.code + [f"{var_name} = {expression.place if expression.place else declared_type}"]
+            return CodeFragment(code, var_name, expression.type if expression.type else declared_type)
         
         return CodeFragment([], None, "unknown")
 
