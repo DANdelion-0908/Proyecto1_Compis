@@ -619,34 +619,21 @@ class Visitor(CompiscriptVisitor):
     # *** Functions Methods ***
     # *************************
 
-    def visitFunctionDeclaration(self, ctx:CompiscriptParser.FunctionDeclarationContext):
-        # Handle function declarations
+    def visitFunctionDeclaration(self, ctx: CompiscriptParser.FunctionDeclarationContext):
         func_name = ctx.Identifier().getText()
+
         if func_name in self.symbol_table:
             self.add_error(f"Function '{func_name}' already declared", ctx)
-            return self.visitChildren(ctx)
+            return CodeFragment([], None, "unknown")
 
-        # Get return type
-        return_type = ctx.type_().getText() if ctx.type_() else "unknown"
+        return_type = ctx.type_().getText() if ctx.type_() else "void"
 
-        # Get parameter types
         param_types = {}
         if ctx.parameters():
             for param in ctx.parameters().parameter():
                 pname = param.Identifier().getText()
                 ptype = param.type_().getText() if param.type_() else "unknown"
-
-                # Check for duplicate parameter names
-                if pname in param_types:
-                    self.add_error(f"Parameter '{pname}' already declared in function '{func_name}'", ctx)
-                
-                else:
-                    param_types[pname] = ptype
-        
-        # Check for duplicate function names
-        if func_name in self.symbol_table:
-            self.add_error(f"Function '{func_name}' already declared", ctx)
-            return self.visitChildren(ctx)
+                param_types[pname] = ptype
 
         self.symbol_table[func_name] = {
             "type": return_type,
@@ -654,82 +641,74 @@ class Visitor(CompiscriptVisitor):
             "const": True
         }
 
-        # Create new scope for function parameters
         old_symbols = self.symbol_table.copy()
         for pname, ptype in param_types.items():
             self.symbol_table[pname] = {"type": ptype, "const": False}
 
-        # Push function return type to stack
         self.function_stack.append(return_type)
 
-        self.visit(ctx.block())
+        body = self.visit(ctx.block())
 
-        # Restore previous scope and function stack
+        start_label = self.cg.new_label()
+        end_label = self.cg.new_label()
+        code = [f"{func_name}:"] + body.code + [f"{end_label}:"]
+
         self.symbol_table = old_symbols
         self.function_stack.pop()
 
-    def visitReturnStatement(self, ctx:CompiscriptParser.ReturnStatementContext):
-        # Handle return statements
+        return CodeFragment(code, func_name, "function")
+
+    def visitReturnStatement(self, ctx: CompiscriptParser.ReturnStatementContext):
         if not self.function_stack:
             self.add_error("'return' used outside of function", ctx)
-            return "unknown"
+            return CodeFragment([], None, "unknown")
 
         expected_type = self.function_stack[-1]
-        expr_type = self.visit(ctx.expression()) if ctx.expression() else "void"
+        expr = self.visit(ctx.expression()) if ctx.expression() else None
 
-        # Check return type consistency
-        if expected_type != "unknown" and expr_type != expected_type:
-            self.add_error(
-                f"Type error: function expects {expected_type} but got {expr_type}", ctx
-            )
-        return expr_type
+        if expr and expr.type != expected_type and expected_type != "unknown":
+            self.add_error(f"Type error: function expects {expected_type} but got {expr.type}", ctx)
+
+        code = []
+        if expr:
+            code += expr.code + [f"return {expr.place}"]
+        else:
+            code.append("return")
+
+        return CodeFragment(code, None, expected_type)
 
     def visitCallExpr(self, ctx:CompiscriptParser.CallExprContext):
         # Handle function call expressions
         # Get the function name from the parent context (primaryAtom)
         function_name = ctx.parentCtx.getChild(0).getText()
-        
-        # Check if the function is declared
+
         if function_name not in self.symbol_table:
             self.add_error(f"Function '{function_name}' not declared", ctx)
-            return "unknown"
-        
+            return CodeFragment([], None, "unknown")
+
         func_info = self.symbol_table[function_name]
-        
-        # Check if it's actually a function
         if "params" not in func_info:
             self.add_error(f"'{function_name}' is not a function", ctx)
-            return "unknown"
-        
-        # Get expected parameters
-        expected_params = func_info["params"]
-        expected_param_count = len(expected_params)
-        
-        # Get actual arguments
-        actual_args = []
+            return CodeFragment([], None, "unknown")
+
+        expected_params = list(func_info["params"].values())
+        args = []
         if ctx.arguments():
-            actual_args = [self.visit(arg) for arg in ctx.arguments().expression()]
-        actual_arg_count = len(actual_args)
-        
-        # Check parameter count
-        if actual_arg_count != expected_param_count:
-            self.add_error(
-                f"Function '{function_name}' expects {expected_param_count} arguments but got {actual_arg_count}", 
-                ctx
-            )
-            return func_info["type"]
-        
-        # Check parameter types
-        expected_param_types = list(expected_params.values())
-        for i, (expected_type, actual_type) in enumerate(zip(expected_param_types, actual_args)):
-            if expected_type != actual_type:
-                self.add_error(
-                    f"Type error in argument {i+1}: expected {expected_type} but got {actual_type}", 
-                    ctx
-                )
-        
-        # Return the function's return type. Just in case.
-        return func_info["type"]
+            args = [self.visit(arg) for arg in ctx.arguments().expression()]
+
+        if len(args) != len(expected_params):
+            self.add_error(f"Function '{function_name}' expects {len(expected_params)} args, got {len(args)}", ctx)
+            return CodeFragment([], None, func_info["type"])
+
+        code = []
+        for arg in args:
+            code += arg.code
+            code.append(f"param {arg.place}")
+
+        temp = self.cg.new_temp()
+        code.append(f"{temp} = call {function_name}, {len(args)}")
+
+        return CodeFragment(code, temp, func_info["type"])
     
     def visitProgram(self, ctx:CompiscriptParser.ProgramContext):
         print("Aquí estamos")
