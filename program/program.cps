@@ -13,7 +13,6 @@ function ostras(a: integer, b: boolean): integer {
         while (true) {
             const idk: string = "Funca";
             return yui;
-            let muy = 1;
         }
     }
 }
