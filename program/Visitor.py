@@ -566,33 +566,44 @@ class Visitor(CompiscriptVisitor):
         self.loop_depth -= 1
         return CodeFragment(code, None, "void")
 
-
-    def visitForeachStatement(self, ctx:CompiscriptParser.ForeachStatementContext):
-        # Handle foreach statements
-        # Increase loop depth
+    def visitForeachStatement(self, ctx: CompiscriptParser.ForeachStatementContext):
         self.loop_depth += 1
-        
-        iterable_type = self.visit(ctx.expression())
-        
-        # Check if iterable is an array
-        if not iterable_type.endswith("[]"):
-            self.add_error("Foreach requires an array to iterate over", ctx)
-            elem_type = "unknown"
-        
-        else:
-            elem_type = iterable_type.replace("[]", "", 1)
 
+        iterable = self.visit(ctx.expression())
         var_name = ctx.Identifier().getText()
 
-        self.symbol_table[var_name] = elem_type
-        
-        self.visit(ctx.block())
-        
-        # Remove loop variable from symbol table
+        if not iterable.type.endswith("[]"):
+            self.add_error("Foreach requires an array to iterate over", ctx)
+            elem_type = "unknown"
+        else:
+            elem_type = iterable.type.replace("[]", "", 1)
+
+        # Add loop variable
+        self.symbol_table[var_name] = {"type": elem_type, "const": False}
+
+        start_label = self.cg.new_label()
+        loop_label = self.cg.new_label()
+        end_label = self.cg.new_label()
+        index_temp = self.cg.new_temp()
+
+        body = self.visit(ctx.block())
+
+        code = []
+        code += iterable.code
+        code.append(f"{index_temp} = 0")
+        code.append(f"{start_label}:")
+        code.append(f"if {index_temp} >= len({iterable.place}) goto {end_label}")
+        temp_elem = self.cg.new_temp()
+        code.append(f"{temp_elem} = {iterable.place}[{index_temp}]")
+        code.append(f"{var_name} = {temp_elem}")
+        code += body.code
+        code.append(f"{index_temp} = {index_temp} + 1")
+        code.append(f"goto {start_label}")
+        code.append(f"{end_label}:")
+
         del self.symbol_table[var_name]
-        
-        # Decrease loop depth
         self.loop_depth -= 1
+        return CodeFragment(code, None, "void")
 
     def visitBreakStatement(self, ctx):
         # Handle break statements
