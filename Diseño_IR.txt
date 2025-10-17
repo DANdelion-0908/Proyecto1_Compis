@@ -1,6 +1,5 @@
 # temporales: t0 t1 t2 ...
 # labels: L0, L1 ...
-# globals: @g_x
 # functions: func_main
 
 # asignar
@@ -8,14 +7,10 @@ t0 = a + b
 t1 = t0 * 5
 x = t1
 
-# load/store para memoria (arrays / variables)
-t2 = load @g_arr, index  ; si arr es global / base + index
-store t1, @local_0       ; almacenar en variable local offset 0
-
 # llamada
 param t3
 param 4
-t4 = call func_sum, 2    ; t4 recibe valor de retorno
+t4 = call func_sum, 2 // Cantidad de parámetros
 
 # control
 if t4 < 10 goto L1
