@@ -16,13 +16,13 @@ def index():
     result = None
     image_url = None
     symbol_table = None
+    intermediate_code = None  # 🔹 Nuevo
 
     if request.method == "POST":
         code = request.form.get("code", "")
         try:
             parse_result = parse_text(code)
             
-            # Combine syntax and semantic errors
             all_errors = parse_result["syntax_errors"] + parse_result["semantic_errors"]
             
             if all_errors:
@@ -30,13 +30,21 @@ def index():
             else:
                 result = {"status": "ok", "messages": ["OK"]}
                 symbol_table = parse_result["symbol_table"]
+                intermediate_code = parse_result["intermediate_code"]  # 🔹 Capturamos el TAC
             
             image_url = "/static_result/" + os.path.basename(parse_result["image_path"])
             
         except Exception as e:
             result = {"status": "error", "messages": [f"Unexpected error: {e}"]}
 
-    return render_template("index.html", result=result, image_url=image_url, symbol_table=symbol_table)
+    return render_template(
+        "index.html", 
+        result=result, 
+        image_url=image_url, 
+        symbol_table=symbol_table, 
+        intermediate_code=intermediate_code  # 🔹 Enviamos al HTML
+    )
+
 
 # Servir parse_tree.png desde el directorio padre (donde se genera)
 @app.route("/static_result/<filename>")

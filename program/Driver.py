@@ -39,7 +39,6 @@ def tree_to_graph(tree, rule_names, graph=None, parent=None, count=[0]):
 
     return graph
 
-
 def parse_text(code: str):
     input_stream = InputStream(code)
     lexer = CompiscriptLexer(input_stream)
@@ -60,7 +59,7 @@ def parse_text(code: str):
     
     # Run visitor to get semantic errors and symbol table
     visitor = Visitor()
-    visitor.visit(tree)
+    tac_code = visitor.visit(tree)
     semantic_errors = visitor.errors
     
     # Generate parse tree image
@@ -72,7 +71,8 @@ def parse_text(code: str):
         "syntax_errors": syntax_errors,
         "semantic_errors": semantic_errors,
         "symbol_table": visitor.symbol_table,
-        "image_path": output_path + ".png"
+        "image_path": output_path + ".png",
+        "intermediate_code": visitor.generated_code if hasattr(visitor, "generated_code") else tac_code
     }
 
 def main(argv):
