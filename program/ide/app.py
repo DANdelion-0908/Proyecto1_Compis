@@ -16,7 +16,7 @@ def index():
     result = None
     image_url = None
     symbol_table = None
-    intermediate_code = None  # 🔹 Nuevo
+    intermediate_code = None
 
     if request.method == "POST":
         code = request.form.get("code", "")
