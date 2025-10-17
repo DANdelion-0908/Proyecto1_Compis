@@ -485,66 +485,87 @@ class Visitor(CompiscriptVisitor):
         return CodeFragment(code, None, "void")
 
     def visitWhileStatement(self, ctx:CompiscriptParser.WhileStatementContext):
-        # Handle while statements
         # Increase loop depth
         self.loop_depth += 1
+
+        start_label = self.cg.new_label()
+        body_label = self.cg.new_label()
+        end_label = self.cg.new_label()
 
         condition = self.visit(ctx.expression())
+        body = self.visit(ctx.block())
         
         # Allow only boolean conditions
-        if condition != "boolean":
+        if condition.type != "boolean":
             self.add_error("Condition in 'while' must be boolean", ctx)
     
-        self.visit(ctx.block())
-        
-        # Decrease loop depth
-        self.loop_depth -= 1
+        code = []
+        code.append(f"{start_label}:")
+        code += condition.code
+        code.append(f"ifFalse {condition.place} goto {end_label}")
+        code += body.code
+        code.append(f"goto {start_label}")
+        code.append(f"{end_label}:")
 
-    def visitDoWhileStatement(self, ctx:CompiscriptParser.DoWhileStatementContext):
-        # Handle do-while statements
-        # Increase loop depth
+        self.loop_depth -= 1
+        return CodeFragment(code, None, "void")
+
+    def visitDoWhileStatement(self, ctx: CompiscriptParser.DoWhileStatementContext):
         self.loop_depth += 1
 
-        self.visit(ctx.block())
-        
-        cond_type = self.visit(ctx.expression())
-        
-        # Allow only boolean conditions
-        if cond_type != "boolean":
+        start_label = self.cg.new_label()
+        condition_label = self.cg.new_label()
+        end_label = self.cg.new_label()
+
+        body = self.visit(ctx.block())
+        condition = self.visit(ctx.expression())
+
+        if condition.type != "boolean":
             self.add_error("Condition in 'do-while' must be boolean", ctx)
-        
-        # Decrease loop depth
-        self.loop_depth -= 1
 
-    def visitForStatement(self, ctx:CompiscriptParser.ForStatementContext):
-        # Handle for statements
-        # Increase loop depth
+        code = []
+        code.append(f"{start_label}:")
+        code += body.code
+        code.append(f"{condition_label}:")
+        code += condition.code
+        code.append(f"ifTrue {condition.place} goto {start_label}")
+        code.append(f"{end_label}:")
+
+        self.loop_depth -= 1
+        return CodeFragment(code, None, "void")
+
+    def visitForStatement(self, ctx: CompiscriptParser.ForStatementContext):
         self.loop_depth += 1
 
-        # Check initializer
+        init_code = []
         if ctx.variableDeclaration():
-            self.visit(ctx.variableDeclaration())
-
-        # Check assignment
+            init_code = self.visit(ctx.variableDeclaration()).code
         elif ctx.assignment():
-            self.visit(ctx.assignment())
+            init_code = self.visit(ctx.assignment()).code
 
-        # Check condition
-        if ctx.expression(0):
-            cond_type = self.visit(ctx.expression(0))
+        start_label = self.cg.new_label()
+        body_label = self.cg.new_label()
+        end_label = self.cg.new_label()
 
-            # Allow only boolean conditions
-            if cond_type != "boolean":
-                self.add_error("Condition in 'for' must be boolean", ctx)
+        condition = self.visit(ctx.expression(0)) if ctx.expression(0) else None
+        increment = self.visit(ctx.expression(1)) if ctx.expression(1) else None
+        body = self.visit(ctx.block())
 
-        # Check increment/decrement
-        if ctx.expression(1):
-            self.visit(ctx.expression(1))
+        code = []
+        code += init_code
+        code.append(f"{start_label}:")
+        if condition:
+            code += condition.code
+            code.append(f"ifFalse {condition.place} goto {end_label}")
+        code += body.code
+        if increment:
+            code += increment.code
+        code.append(f"goto {start_label}")
+        code.append(f"{end_label}:")
 
-        self.visit(ctx.block())
-
-        # Decrease loop depth
         self.loop_depth -= 1
+        return CodeFragment(code, None, "void")
+
 
     def visitForeachStatement(self, ctx:CompiscriptParser.ForeachStatementContext):
         # Handle foreach statements
