@@ -711,13 +711,14 @@ class Visitor(CompiscriptVisitor):
         return CodeFragment(code, temp, func_info["type"])
     
     def visitProgram(self, ctx:CompiscriptParser.ProgramContext):
-        print("Aquí estamos")
         code = []
-        
+
         for stmt in ctx.statement():
             frag = self.visit(stmt)
-
             if isinstance(frag, CodeFragment):
                 code.extend(frag.code)
 
-        print("\n".join(code))
+        tac_code = "\n".join(code)
+        self.generated_code = tac_code
+        print(tac_code)
+        return tac_code
