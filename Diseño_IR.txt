@@ -1,6 +1,5 @@
 # temporales: t0 t1 t2 ...
 # labels: L0, L1 ...
-# globals: @g_x
 # functions: func_main
 
 # asignar
@@ -11,7 +10,7 @@ x = t1
 # llamada
 param t3
 param 4
-t4 = call func_sum, 2
+t4 = call func_sum, 2 // Cantidad de parámetros
 
 # control
 if t4 < 10 goto L1

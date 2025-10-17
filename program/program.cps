@@ -7,9 +7,22 @@ if (0 > 5) {
 
 x = 0;
 
+function ostras(a: integer, b: boolean): integer {
+    let yui = a;
+    if (yui == a) {
+        while (true) {
+            const idk: string = "Funca";
+            return yui;
+            let muy = 1;
+        }
+    }
+}
+
 while (1 > 10) {
     let lol = 0;
     lol = lol + x;
 }
 
 x = 0;
+
+ostras(x, true);

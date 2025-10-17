@@ -1,11 +1,11 @@
 # MyLang
 
-### Integrantes
+## Integrantes
 
 - Eunice Mata, 21231
 - Héctor Penedo, 22217
 
-### Librerias
+## Librerias
 
 Las librerías que utiliza este contenedor son:
 
@@ -13,15 +13,15 @@ Las librerías que utiliza este contenedor son:
 - Flask
 - Graphviz
 
-### ¿Cómo iniciar el contenedor?
+## ¿Cómo iniciar el contenedor?
 
-Windows
+### Windows
 
 ```bash
 docker build --rm . -t csp-image && docker run --rm -ti -p 5050:5050 -v "%cd%\program":/program csp-image
 ```
 
-Linux
+### Linux
 
 ```bash
 docker build --rm . -t csp-image && docker run --rm -ti -p 5050:5050 -v "$(pwd)/program":/program csp-image
