@@ -1,0 +1,29 @@
+body {
+  background-color: #fefae0;
+  color: #6a994e;
+}
+
+textarea{
+  background-color: #202020;
+  color: #a7c957;
+  font-family: monospace
+}
+
+button{
+  background-color: #31572c;
+  color: #faedcd;
+  border-radius: 10px;
+  border: none;
+}
+
+h1{
+  display: flex;
+  justify-content: center;
+}
+
+input{
+  background-color: #31572c;
+  color: #faedcd;
+  border-radius: 10px;
+  border: none;
+}
