@@ -66,6 +66,8 @@ def parse_text(code: str):
     graph = tree_to_graph(tree, parser.ruleNames)
     output_path = "parse_tree" 
     graph.render(output_path, format='png', cleanup=True)
+
+    # print(tree.toStringTree(recog=parser))
     
     return {
         "syntax_errors": syntax_errors,
