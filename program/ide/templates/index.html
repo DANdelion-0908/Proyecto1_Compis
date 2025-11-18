@@ -64,6 +64,11 @@
         <h3>Árbol de sintaxis generado:</h3>
         <img src="{{ image_url }}" alt="Parse Tree" style="max-width:100%; border:1px solid #ccc;"/>
       {% endif %}
+
+      {% if mips_code %}
+        <h3>Código MIPS Assembly</h3>
+        <pre>{{ mips_code }}</pre>
+      {% endif %}
     </div>
 
     <div class="symbols-section">

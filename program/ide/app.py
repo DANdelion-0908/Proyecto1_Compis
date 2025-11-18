@@ -17,32 +17,35 @@ def index():
     image_url = None
     symbol_table = None
     intermediate_code = None
+    mips_code = None
 
     if request.method == "POST":
         code = request.form.get("code", "")
         try:
             parse_result = parse_text(code)
-            
+
             all_errors = parse_result["syntax_errors"] + parse_result["semantic_errors"]
-            
+
             if all_errors:
                 result = {"status": "error", "messages": all_errors}
             else:
                 result = {"status": "ok", "messages": ["OK"]}
                 symbol_table = parse_result["symbol_table"]
-                intermediate_code = parse_result["intermediate_code"]  # 🔹 Capturamos el TAC
-            
+                intermediate_code = parse_result["intermediate_code"]  # Capturamos el TAC
+                mips_code = parse_result.get("mips_code", "")  # Capturamos el código MIPS
+
             image_url = "/static_result/" + os.path.basename(parse_result["image_path"])
-            
+
         except Exception as e:
             result = {"status": "error", "messages": [f"Unexpected error: {e}"]}
 
     return render_template(
-        "index.html", 
-        result=result, 
-        image_url=image_url, 
-        symbol_table=symbol_table, 
-        intermediate_code=intermediate_code  # 🔹 Enviamos al HTML
+        "index.html",
+        result=result,
+        image_url=image_url,
+        symbol_table=symbol_table,
+        intermediate_code=intermediate_code,  # Enviamos al HTML
+        mips_code=mips_code  # Enviamos código MIPS al HTML
     )
 
 
