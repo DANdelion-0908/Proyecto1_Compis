@@ -2,6 +2,7 @@ from CompiscriptParser import CompiscriptParser
 from CompiscriptVisitor import CompiscriptVisitor
 from CodeFragment import CodeFragment
 from CodeGenerator import CodeGenerator
+from MIPSGenerator import MIPSGenerator
 
 class Visitor(CompiscriptVisitor):
     def __init__(self):
@@ -10,6 +11,7 @@ class Visitor(CompiscriptVisitor):
         self.loop_depth = 0  # Track loop depth for break/continue statements
         self.function_stack = []  # Track function context for return type checking
         self.cg = CodeGenerator()  # Generation of temporal code with format t or L
+        self.mips_gen = MIPSGenerator()  # Generation of MIPS assembly code
 
     def add_error(self, message, ctx):
         # Add an error message with line information to the errors list
@@ -776,7 +778,16 @@ class Visitor(CompiscriptVisitor):
             if isinstance(frag, CodeFragment):
                 code.extend(frag.code)
 
+        # Generar código intermedio (TAC)
         tac_code = "\n".join(code)
         self.generated_code = tac_code
+        print("=== Código Intermedio (TAC) ===")
         print(tac_code)
+
+        # Generar código MIPS a partir del TAC
+        mips_code = self.mips_gen.translate_tac_to_mips(tac_code)
+        self.mips_code = mips_code
+        print("\n=== Código MIPS ===")
+        print(mips_code)
+
         return tac_code
