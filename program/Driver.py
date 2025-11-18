@@ -61,20 +61,21 @@ def parse_text(code: str):
     visitor = Visitor()
     tac_code = visitor.visit(tree)
     semantic_errors = visitor.errors
-    
+
     # Generate parse tree image
     graph = tree_to_graph(tree, parser.ruleNames)
-    output_path = "parse_tree" 
+    output_path = "parse_tree"
     graph.render(output_path, format='png', cleanup=True)
 
     # print(tree.toStringTree(recog=parser))
-    
+
     return {
         "syntax_errors": syntax_errors,
         "semantic_errors": semantic_errors,
         "symbol_table": visitor.symbol_table,
         "image_path": output_path + ".png",
-        "intermediate_code": visitor.generated_code if hasattr(visitor, "generated_code") else tac_code
+        "intermediate_code": visitor.generated_code if hasattr(visitor, "generated_code") else tac_code,
+        "mips_code": visitor.mips_code if hasattr(visitor, "mips_code") else ""
     }
 
 def main(argv):
