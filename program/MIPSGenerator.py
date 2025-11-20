@@ -31,6 +31,12 @@ class MIPSGenerator:
         # Parámetros de función en espera
         self.params = []
 
+        # Variables declaradas (para saber si necesitan espacio en .data)
+        self.declared_vars = set()
+
+        # Estamos dentro de una función
+        self.in_function = False
+
     def get_register(self, var):
         """
         Implementación de getReg(): Asigna un registro a una variable.
@@ -87,10 +93,46 @@ class MIPSGenerator:
             # Está en el stack
             offset = self.stack_vars[operand]
             self.mips_code.append(f"    lw {reg}, -{offset}($sp)")
+        # Si es un temporal del TAC (t1, t2, etc.)
+        elif operand.startswith('t') and len(operand) > 1 and operand[1:].isdigit():
+            # Asignar registro si no tiene uno
+            if operand not in self.register_map:
+                temp_reg = self.get_register(operand)
+                if temp_reg.startswith('$'):
+                    # Ya está asignado, mover si es necesario
+                    if temp_reg != reg:
+                        self.mips_code.append(f"    move {reg}, {temp_reg}")
+                else:
+                    # Está en stack
+                    self.mips_code.append(f"    lw {reg}, {temp_reg}")
+            else:
+                # Ya tiene registro asignado
+                temp_reg = self.register_map[operand]
+                if temp_reg != reg and temp_reg.startswith('$'):
+                    self.mips_code.append(f"    move {reg}, {temp_reg}")
+                elif not temp_reg.startswith('$'):
+                    self.mips_code.append(f"    lw {reg}, {temp_reg}")
+        # Si es un identificador (variable)
+        elif operand.replace('_', '').replace('$', '').isalnum():
+            # Verificar si es una variable declarada o un parámetro
+            # Por ahora, asumir que está en el stack frame local
+            if operand not in self.register_map:
+                # Asignar un registro nuevo
+                var_reg = self.get_register(operand)
+                if var_reg.startswith('$'):
+                    # Cargar desde memoria o inicializar
+                    self.mips_code.append(f"    # Cargar variable {operand}")
+                else:
+                    # Está en stack
+                    self.mips_code.append(f"    lw {reg}, {var_reg}")
+            else:
+                var_reg = self.register_map[operand]
+                if var_reg.startswith('$') and var_reg != reg:
+                    self.mips_code.append(f"    move {reg}, {var_reg}")
+                elif not var_reg.startswith('$'):
+                    self.mips_code.append(f"    lw {reg}, {var_reg}")
         else:
-            # Nueva variable, asumimos que es un valor
-            # Para strings y otros tipos, por ahora cargamos como dirección
-            self.mips_code.append(f"    la {reg}, {operand}")
+            self.mips_code.append(f"    # No se pudo cargar: {operand}")
 
     def translate_tac_to_mips(self, tac_code):
         """
@@ -101,18 +143,31 @@ class MIPSGenerator:
         else:
             lines = tac_code
 
+        # Analizar primero para detectar funciones y variables
+        has_main = False
+        for line in lines:
+            line = line.strip()
+            if line.startswith('main:'):
+                has_main = True
+                break
+
         # Inicializar código MIPS con secciones básicas
         self.mips_code = [
             ".data",
             "    newline: .asciiz \"\\n\"",
             "",
             ".text",
-            ".globl main",
-            "main:",
-            "    # Inicializar frame pointer",
-            "    move $fp, $sp",
-            ""
+            ".globl main"
         ]
+
+        # Si no hay función main explícita, crear una
+        if not has_main:
+            self.mips_code.extend([
+                "main:",
+                "    # Inicializar frame pointer",
+                "    move $fp, $sp",
+                ""
+            ])
 
         for line in lines:
             line = line.strip()
@@ -121,13 +176,14 @@ class MIPSGenerator:
 
             self.translate_instruction(line)
 
-        # Finalizar programa
-        self.mips_code.extend([
-            "",
-            "    # Terminar programa",
-            "    li $v0, 10",
-            "    syscall"
-        ])
+        # Finalizar programa solo si estamos en main
+        if not self.in_function:
+            self.mips_code.extend([
+                "",
+                "    # Terminar programa",
+                "    li $v0, 10",
+                "    syscall"
+            ])
 
         return "\n".join(self.mips_code)
 
@@ -135,8 +191,26 @@ class MIPSGenerator:
         """
         Traduce una instrucción TAC individual a MIPS.
         """
+        # Etiquetas de función (nombre seguido de :, no Lnumero:)
+        if instruction.endswith(':') and not re.match(r'L\d+:', instruction):
+            func_name = instruction[:-1]
+            self.mips_code.append(f"\n{func_name}:")
+            self.in_function = True
+            # Prólogo de función: guardar $ra y $fp
+            self.mips_code.append("    # Prólogo de función")
+            self.mips_code.append("    addi $sp, $sp, -8")
+            self.mips_code.append("    sw $ra, 4($sp)")
+            self.mips_code.append("    sw $fp, 0($sp)")
+            self.mips_code.append("    move $fp, $sp")
+            return
+
+        # Etiquetas normales: L1:
+        elif instruction.endswith(':'):
+            # La etiqueta ya incluye los :
+            self.mips_code.append(f"\n{instruction}")
+
         # Asignación simple: x = y
-        if '=' in instruction and not any(op in instruction for op in ['+', '-', '*', '/', '%', '<', '>', '==', '!=', '&&', '||', '!']):
+        elif '=' in instruction and not any(op in instruction for op in ['+', '-', '*', '/', '%', '<', '>', '==', '!=', '&&', '||', '!', 'call']):
             self.translate_assignment(instruction)
 
         # Operaciones aritméticas: x = y op z
@@ -154,11 +228,6 @@ class MIPSGenerator:
         # Operación unaria: x = -y o x = !y
         elif re.match(r'(\w+)\s*=\s*([-!])\s*(.+)', instruction):
             self.translate_unary(instruction)
-
-        # Etiquetas: L1:
-        elif instruction.endswith(':'):
-            label = instruction[:-1]
-            self.mips_code.append(f"\n{label}:")
 
         # Saltos condicionales: if condition goto L
         elif instruction.startswith('if'):
@@ -440,9 +509,13 @@ class MIPSGenerator:
             return_value = parts[1]
             self.load_value(return_value, "$v0")
 
-        # Restaurar frame pointer y retornar
-        self.mips_code.append("    move $sp, $fp")
+        # Epílogo de función: restaurar frame pointer y retornar
+        self.mips_code.append("    # Epílogo de función")
+        self.mips_code.append("    lw $fp, 0($sp)")
+        self.mips_code.append("    lw $ra, 4($sp)")
+        self.mips_code.append("    addi $sp, $sp, 8")
         self.mips_code.append("    jr $ra")
+        self.in_function = False
 
     def translate_push(self, instruction):
         """

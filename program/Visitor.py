@@ -41,8 +41,29 @@ class Visitor(CompiscriptVisitor):
         return CodeFragment([], "None", "unknown_primary")
     
     def visitLeftHandSide(self, ctx: CompiscriptParser.LeftHandSideContext):
-        name = ctx.getText()
+        # Si no hay suffixOp, es solo una variable
+        if not ctx.suffixOp() or len(ctx.suffixOp()) == 0:
+            name = ctx.getText()
+            symbol = self.symbol_table.get(name)
+            if symbol:
+                return CodeFragment([], name, symbol['type'])
+            else:
+                self.add_error(f"Undefined variable '{name}'", ctx)
+                return CodeFragment([], name, "unknown_var")
 
+        # Si hay suffixOp, verificar si es una llamada a función o acceso a array
+        for suffix in ctx.suffixOp():
+            # suffix ya es el contexto específico (CallExprContext, IndexExprContext, etc.)
+            suffix_type = suffix.__class__.__name__
+            if 'CallExpr' in suffix_type:
+                # Es una llamada a función
+                return self.visit(suffix)
+            elif 'IndexExpr' in suffix_type:
+                # Es un acceso a array
+                return self.visit(suffix)
+
+        # Por defecto, tratar como variable
+        name = ctx.getText()
         symbol = self.symbol_table.get(name)
         if symbol:
             return CodeFragment([], name, symbol['type'])
