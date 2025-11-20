@@ -37,6 +37,12 @@ class MIPSGenerator:
         # Estamos dentro de una función
         self.in_function = False
 
+        # Nombre de la función actual (para detectar métodos de clase)
+        self.current_function = None
+
+        # Contador de parámetros encontrados en la función actual
+        self.param_counter = 0
+
     def get_register(self, var):
         """
         Implementación de getReg(): Asigna un registro a una variable.
@@ -122,11 +128,26 @@ class MIPSGenerator:
                 # Puede ser un parámetro de función
                 # Si estamos en una función y es un identificador simple, asumimos que es parámetro
                 if self.in_function and operand.isalpha():
-                    # Asignar $a0 como el registro para este parámetro (primer parámetro)
-                    # Para simplicidad, usamos $a0 para el primer parámetro encontrado
-                    self.register_map[operand] = "$a0"
-                    if reg != "$a0":
-                        self.mips_code.append(f"    move {reg}, $a0")
+                    # Determinar si es un método de clase (tiene underscore: ClassName_methodName)
+                    is_method = '_' in self.current_function if self.current_function else False
+
+                    # Para métodos, $a0 es 'this', parámetros empiezan en $a1
+                    # Para funciones normales, parámetros empiezan en $a0
+                    param_start = 1 if is_method else 0
+                    param_reg_index = param_start + self.param_counter
+
+                    if param_reg_index < 4:  # MIPS tiene $a0-$a3
+                        param_reg = f"$a{param_reg_index}"
+                        self.register_map[operand] = param_reg
+                        self.param_counter += 1
+                        if reg != param_reg:
+                            self.mips_code.append(f"    move {reg}, {param_reg}")
+                    else:
+                        # Si hay más de 4 parámetros, están en el stack
+                        # (por simplicidad, por ahora usamos un registro temporal)
+                        var_reg = self.get_register(operand)
+                        if var_reg.startswith('$') and var_reg != reg:
+                            self.mips_code.append(f"    move {reg}, {var_reg}")
                 else:
                     # Asignar un registro nuevo
                     var_reg = self.get_register(operand)
@@ -154,9 +175,10 @@ class MIPSGenerator:
         else:
             lines = tac_code
 
-        # PRIMER PASO: Analizar para detectar variables y funciones
+        # PRIMER PASO: Analizar para detectar variables, funciones y clases
         variables = set()
         arrays = set()
+        objects = set()  # Para instancias de clases
         has_main = False
 
         for line in lines:
@@ -170,8 +192,11 @@ class MIPSGenerator:
                 parts = line.split('=')
                 var_name = parts[0].strip()
 
+                # Detectar creación de objetos primero (usar regex para palabra completa "new")
+                if re.match(r'(\w+)\s*=\s*new\s+(\w+)', line):
+                    objects.add(var_name)
                 # Si no es temporal (t1, t2, etc.) y no es llamada a función
-                if not (var_name.startswith('t') and var_name[1:].isdigit()):
+                elif not (var_name.startswith('t') and var_name[1:].isdigit()):
                     if 'call' not in line:
                         variables.add(var_name)
 
@@ -191,19 +216,59 @@ class MIPSGenerator:
         for arr in sorted(arrays):
             self.mips_code.append(f"    array_{arr}: .space 400  # Espacio para 100 integers")
 
-        # Agregar constantes útiles
-        self.mips_code.extend([
-            "    newline: .asciiz \"\\n\"",
-            "    true_str: .asciiz \"true\"",
-            "    false_str: .asciiz \"false\"",
-            ""
-        ])
+        # Agregar objetos (instancias de clases)
+        for obj in sorted(objects):
+            self.mips_code.append(f"    obj_{obj}: .space 64  # Espacio para objeto (16 atributos max)")
+
+        # constantes útiles
+        # self.mips_code.extend([
+        #     "    newline: .asciiz \"\\n\"",
+        #     "    true_str: .asciiz \"true\"",
+        #     "    false_str: .asciiz \"false\"",
+        #     "    exception_msg: .asciiz \"Exception: \"",
+        #     ""
+        # ])
 
         # TERCER PASO: Sección de texto
         self.mips_code.extend([
             ".text",
             ".globl main"
         ])
+
+        # Separar código main de definiciones de funciones
+        main_code = []
+        function_code = []
+        current_list = main_code
+        in_function_def = False
+
+        for line in lines:
+            line_stripped = line.strip()
+            if not line_stripped or line_stripped.startswith("#"):
+                continue
+
+            # Si encontramos una etiqueta de función (no Lnumero), cambiar a function_code
+            if line_stripped.endswith(':') and not re.match(r'L\d+:', line_stripped):
+                if not line_stripped.startswith('main:'):
+                    current_list = function_code
+                    in_function_def = True
+                else:
+                    current_list = main_code
+                    in_function_def = False
+            # Si vemos 'return', significa que la función terminará pronto
+            elif 'return' in line_stripped and in_function_def:
+                current_list.append(line_stripped)
+                # Siguiente etiqueta (Lnumero) sigue siendo parte de la función
+                continue
+            # Si encontramos una etiqueta Lnumero después de un return, es el final de la función
+            elif line_stripped.endswith(':') and re.match(r'L\d+:', line_stripped) and in_function_def:
+                # Esta etiqueta es el final de la función
+                current_list.append(line_stripped)
+                # Volver a código main para el resto
+                current_list = main_code
+                in_function_def = False
+                continue
+
+            current_list.append(line_stripped)
 
         # Si no hay función main explícita, crear una
         if not has_main:
@@ -214,22 +279,22 @@ class MIPSGenerator:
                 ""
             ])
 
-        # CUARTO PASO: Traducir instrucciones
-        for line in lines:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-
+        # CUARTO PASO: Traducir código main
+        for line in main_code:
             self.translate_instruction(line)
 
-        # QUINTO PASO: Finalizar programa
-        if not self.in_function:
+        # Finalizar main si hay código main
+        if not self.in_function or not has_main:
             self.mips_code.extend([
                 "",
                 "    # Terminar programa",
                 "    li $v0, 10",
                 "    syscall"
             ])
+
+        # QUINTO PASO: Traducir funciones
+        for line in function_code:
+            self.translate_instruction(line)
 
         return "\n".join(self.mips_code)
 
@@ -242,6 +307,8 @@ class MIPSGenerator:
             func_name = instruction[:-1]
             self.mips_code.append(f"\n{func_name}:")
             self.in_function = True
+            self.current_function = func_name
+            self.param_counter = 0  # Resetear contador de parámetros
             # Prólogo de función: guardar $ra y $fp
             self.mips_code.append("    # Prólogo de función")
             self.mips_code.append("    addi $sp, $sp, -8")
@@ -252,8 +319,23 @@ class MIPSGenerator:
 
         # Etiquetas normales: L1:
         elif instruction.endswith(':'):
+            # Si estamos en una función y es una etiqueta Lnumero, es el final de la función
+            if self.in_function and re.match(r'L\d+:', instruction):
+                # Agregar epilogo antes de la etiqueta
+                self.mips_code.append("    # Epilogo de funcion")
+                self.mips_code.append("    lw $fp, 0($sp)")
+                self.mips_code.append("    lw $ra, 4($sp)")
+                self.mips_code.append("    addi $sp, $sp, 8")
+                self.mips_code.append("    jr $ra")
+                self.in_function = False
+                self.current_function = None
+                self.param_counter = 0
             # La etiqueta ya incluye los :
             self.mips_code.append(f"\n{instruction}")
+
+        # Creación de objetos: t1 = new ClassName (debe ir ANTES de asignación simple)
+        elif re.match(r'(\w+)\s*=\s*new\s+(\w+)', instruction):
+            self.translate_new_object(instruction)
 
         # Asignación simple: x = y
         elif '=' in instruction and not any(op in instruction for op in ['+', '-', '*', '/', '%', '<', '>', '==', '!=', '&&', '||', '!', 'call']):
@@ -296,6 +378,17 @@ class MIPSGenerator:
         # Return: return x o return
         elif instruction.startswith('return'):
             self.translate_return(instruction)
+
+        # Setup exception handler: # Setup exception handler: label
+        elif instruction.startswith('# Setup exception handler:'):
+            label = instruction.split(':')[1].strip()
+            self.mips_code.append(f"    # Exception handler setup for {label}")
+            # En MIPS real, configurar registro de excepciones
+            self.mips_code.append(f"    la $k0, {label}")  # $k0 para exception handler
+
+        # Exception caught: # Exception caught in var
+        elif instruction.startswith('# Exception caught'):
+            self.mips_code.append(f"    {instruction}")
 
         # Array operations: push, array access, etc.
         elif instruction.startswith('push'):
@@ -573,6 +666,8 @@ class MIPSGenerator:
         self.mips_code.append("    addi $sp, $sp, 8")
         self.mips_code.append("    jr $ra")
         self.in_function = False
+        self.current_function = None
+        self.param_counter = 0
 
     def translate_push(self, instruction):
         """
@@ -626,3 +721,27 @@ class MIPSGenerator:
                     else:
                         self.mips_code.append(f"    lw $t9, {arr}({index_reg})")
                         self.mips_code.append(f"    sw $t9, {dest_reg}")
+
+    def translate_new_object(self, instruction):
+        """
+        Traduce creación de objetos: t1 = new ClassName
+        """
+        match = re.match(r'(\w+)\s*=\s*new\s+(\w+)', instruction)
+        if not match:
+            self.mips_code.append(f"    # Could not parse: {instruction}")
+            return
+
+        dest, class_name = match.groups()
+
+        # Obtener dirección del objeto en .data
+        temp_reg = "$t9"
+        self.mips_code.append(f"    # Create new object of class {class_name}")
+        self.mips_code.append(f"    la {temp_reg}, obj_{dest}")
+
+        # Asignar a variable o temporal
+        dest_reg = self.get_register(dest)
+        if dest_reg.startswith('$'):
+            if dest_reg != temp_reg:
+                self.mips_code.append(f"    move {dest_reg}, {temp_reg}")
+        else:
+            self.mips_code.append(f"    sw {temp_reg}, {dest_reg}")
