@@ -41,35 +41,95 @@ class Visitor(CompiscriptVisitor):
         return CodeFragment([], "None", "unknown_primary")
     
     def visitLeftHandSide(self, ctx: CompiscriptParser.LeftHandSideContext):
-        # Si no hay suffixOp, es solo una variable
+        # Obtener el base (primaryAtom)
+        if not ctx.primaryAtom():
+            return CodeFragment([], None, "unknown")
+
+        base_result = self.visit(ctx.primaryAtom())
+        if not isinstance(base_result, CodeFragment):
+            base_result = CodeFragment([], str(base_result), "unknown")
+
+        # Si no hay suffixOp, devolver el base
         if not ctx.suffixOp() or len(ctx.suffixOp()) == 0:
-            name = ctx.getText()
-            symbol = self.symbol_table.get(name)
-            if symbol:
-                return CodeFragment([], name, symbol['type'])
-            else:
-                self.add_error(f"Undefined variable '{name}'", ctx)
-                return CodeFragment([], name, "unknown_var")
+            return base_result
 
-        # Si hay suffixOp, verificar si es una llamada a función o acceso a array
+        # Procesar la cadena de suffixOp
+        current = base_result
         for suffix in ctx.suffixOp():
-            # suffix ya es el contexto específico (CallExprContext, IndexExprContext, etc.)
             suffix_type = suffix.__class__.__name__
-            if 'CallExpr' in suffix_type:
-                # Es una llamada a función
-                return self.visit(suffix)
-            elif 'IndexExpr' in suffix_type:
-                # Es un acceso a array
+
+            if 'PropertyAccessExpr' in suffix_type:
+                # Acceso a propiedad: objeto.propiedad
+                prop_name = suffix.Identifier().getText()
+
+                # Verificar que el base sea un objeto
+                if current.type in self.symbol_table and self.symbol_table[current.type].get('type') == 'class':
+                    class_info = self.symbol_table[current.type]
+
+                    # Verificar si es un método o atributo
+                    if prop_name in class_info.get('methods', {}):
+                        # Es un método - crear referencia para llamada posterior
+                        current = CodeFragment(current.code, f"{current.place}.{prop_name}", current.type)
+                    elif prop_name in class_info.get('attributes', {}):
+                        # Es un atributo
+                        attr_type = class_info['attributes'][prop_name]
+                        current = CodeFragment(current.code, f"{current.place}.{prop_name}", attr_type)
+                    else:
+                        self.add_error(f"Class '{current.type}' has no member '{prop_name}'", suffix)
+                        current = CodeFragment(current.code, f"{current.place}.{prop_name}", "unknown")
+                else:
+                    self.add_error(f"Cannot access property of non-object type '{current.type}'", suffix)
+                    current = CodeFragment(current.code, f"{current.place}.{prop_name}", "unknown")
+
+            elif 'CallExpr' in suffix_type:
+                # Llamada a función/método
+                # Si current.place contiene '.', es una llamada a método
+                if '.' in current.place:
+                    parts = current.place.split('.')
+                    obj_name = parts[0]
+                    method_name = parts[1]
+
+                    # Obtener información del objeto
+                    obj_symbol = self.symbol_table.get(obj_name)
+                    if obj_symbol and obj_symbol['type'] in self.symbol_table:
+                        class_info = self.symbol_table[obj_symbol['type']]
+                        method_info = class_info.get('methods', {}).get(method_name)
+
+                        if method_info:
+                            # Procesar argumentos
+                            args = []
+                            if suffix.arguments():
+                                for arg_expr in suffix.arguments().expression():
+                                    arg = self.visit(arg_expr)
+                                    if isinstance(arg, CodeFragment):
+                                        args.append(arg)
+
+                            # Generar código para llamada a método
+                            code = current.code.copy()
+
+                            # Agregar el objeto como primer parámetro (this)
+                            code.append(f"param {obj_name}")
+
+                            # Agregar argumentos
+                            for arg in args:
+                                code.extend(arg.code)
+                                code.append(f"param {arg.place}")
+
+                            # Llamar al método calificado
+                            qualified_name = f"{obj_symbol['type']}_{method_name}"
+                            result_temp = self.cg.new_temp()
+                            code.append(f"{result_temp} = call {qualified_name}, {len(args) + 1}")
+
+                            return CodeFragment(code, result_temp, method_info['type'])
+
+                # Si no es método, es función normal
                 return self.visit(suffix)
 
-        # Por defecto, tratar como variable
-        name = ctx.getText()
-        symbol = self.symbol_table.get(name)
-        if symbol:
-            return CodeFragment([], name, symbol['type'])
-        else:
-            self.add_error(f"Undefined variable '{name}'", ctx)
-            return CodeFragment([], name, "unknown_var")
+            elif 'IndexExpr' in suffix_type:
+                # Acceso a array
+                return self.visit(suffix)
+
+        return current
         
     def visitLiteralExpr(self, ctx: CompiscriptParser.LiteralExprContext):
         value = ctx.getText()
@@ -790,7 +850,207 @@ class Visitor(CompiscriptVisitor):
         code.append(f"{temp} = call {function_name}, {len(args)}")
 
         return CodeFragment(code, temp, func_info["type"])
-    
+
+    # *************************
+    # *** Classes & Objects ***
+    # *************************
+
+    def visitClassDeclaration(self, ctx: CompiscriptParser.ClassDeclarationContext):
+        """
+        Maneja declaraciones de clases con métodos y atributos.
+        """
+        class_name = ctx.Identifier(0).getText()  # Primer identificador es el nombre de la clase
+
+        # Verificar herencia
+        parent_class = None
+        if ctx.getChildCount() > 3 and ctx.Identifier(1):  # Si hay segundo identificador, es herencia
+            parent_class = ctx.Identifier(1).getText()
+            if parent_class not in self.symbol_table:
+                self.add_error(f"Parent class '{parent_class}' not defined", ctx)
+
+        # Verificar si la clase ya existe
+        if class_name in self.symbol_table:
+            self.add_error(f"Class '{class_name}' already declared", ctx)
+            return CodeFragment([], None, "unknown")
+
+        # Crear entrada en tabla de símbolos para la clase
+        class_info = {
+            "type": "class",
+            "parent": parent_class,
+            "methods": {},
+            "attributes": {},
+            "const": True
+        }
+
+        # Guardar contexto actual de la tabla de símbolos
+        old_symbols = self.symbol_table.copy()
+
+        # Agregar 'this' al contexto de la clase
+        self.symbol_table["this"] = {"type": class_name, "const": True}
+
+        code = []
+        code.append(f"# Class {class_name}")
+
+        # PRIMERO: Procesar atributos para que estén disponibles para los métodos
+        if ctx.classMember():
+            for member in ctx.classMember():
+                if member.variableDeclaration():
+                    # Es un atributo
+                    var_ctx = member.variableDeclaration()
+                    attr_name = var_ctx.Identifier().getText()
+                    attr_type = var_ctx.typeAnnotation().type_().getText() if var_ctx.typeAnnotation() else "unknown"
+
+                    class_info["attributes"][attr_name] = attr_type
+
+                    # Los atributos se manejan como offsets en la estructura
+                    code.append(f"# Attribute {class_name}.{attr_name}: {attr_type}")
+
+        # SEGUNDO: Procesar métodos (ahora con atributos ya registrados)
+        if ctx.classMember():
+            for member in ctx.classMember():
+                if member.functionDeclaration():
+                    # Es un método
+                    method_ctx = member.functionDeclaration()
+                    method_name = method_ctx.Identifier().getText()
+                    method_return_type = method_ctx.type_().getText() if method_ctx.type_() else "void"
+
+                    # Obtener parámetros
+                    param_types = {}
+                    if method_ctx.parameters():
+                        for param in method_ctx.parameters().parameter():
+                            pname = param.Identifier().getText()
+                            ptype = param.type_().getText() if param.type_() else "unknown"
+                            param_types[pname] = ptype
+
+                    class_info["methods"][method_name] = {
+                        "type": method_return_type,
+                        "params": param_types
+                    }
+
+                    # Generar TAC para el método
+                    # Nombre del método incluye el nombre de la clase
+                    qualified_method_name = f"{class_name}_{method_name}"
+                    code.append(f"{qualified_method_name}:")
+
+                    # Agregar atributos de clase al contexto (para que los métodos puedan accederlos)
+                    for attr_name, attr_type in class_info["attributes"].items():
+                        self.symbol_table[attr_name] = {"type": attr_type, "const": False}
+
+                    # Agregar parámetros al contexto
+                    for pname, ptype in param_types.items():
+                        self.symbol_table[pname] = {"type": ptype, "const": False}
+
+                    self.function_stack.append(method_return_type)
+                    body = self.visit(method_ctx.block())
+                    code.extend(body.code)
+
+                    end_label = self.cg.new_label()
+                    code.append(f"{end_label}:")
+
+                    self.function_stack.pop()
+
+                    # Limpiar atributos del contexto
+                    for attr_name in class_info["attributes"].keys():
+                        if attr_name in self.symbol_table:
+                            del self.symbol_table[attr_name]
+
+                    # Limpiar parámetros
+                    for pname in param_types.keys():
+                        if pname in self.symbol_table:
+                            del self.symbol_table[pname]
+
+        # Guardar clase en tabla de símbolos
+        self.symbol_table[class_name] = class_info
+
+        # Restaurar tabla de símbolos
+        del self.symbol_table["this"]
+        for key in list(self.symbol_table.keys()):
+            if key not in old_symbols and key != class_name:
+                del self.symbol_table[key]
+
+        return CodeFragment(code, class_name, "class")
+
+    def visitNewExpr(self, ctx: CompiscriptParser.NewExprContext):
+        """
+        Maneja creación de objetos: new ClassName(args)
+        """
+        class_name = ctx.Identifier().getText()
+
+        if class_name not in self.symbol_table:
+            self.add_error(f"Class '{class_name}' not defined", ctx)
+            return CodeFragment([], None, "unknown")
+
+        class_info = self.symbol_table[class_name]
+        if class_info.get("type") != "class":
+            self.add_error(f"'{class_name}' is not a class", ctx)
+            return CodeFragment([], None, "unknown")
+
+        # Generar código para crear instancia
+        temp = self.cg.new_temp()
+        code = [f"{temp} = new {class_name}"]
+
+        # Si hay constructor, llamarlo
+        if class_info.get("methods") and "constructor" in class_info["methods"]:
+            # Manejar argumentos del constructor
+            if ctx.arguments():
+                args = [self.visit(arg) for arg in ctx.arguments().expression()]
+                for arg in args:
+                    code.extend(arg.code)
+                    code.append(f"param {arg.place}")
+
+                code.append(f"call {class_name}_constructor, {len(args)}")
+
+        return CodeFragment(code, temp, class_name)
+
+    # **********************
+    # *** Try-Catch ********
+    # **********************
+
+    def visitTryCatchStatement(self, ctx: CompiscriptParser.TryCatchStatementContext):
+        """
+        Maneja bloques try-catch para manejo de excepciones.
+        """
+        # Obtener el nombre de la variable de excepción
+        exception_var = ctx.Identifier().getText()
+
+        # Generar etiquetas
+        try_label = self.cg.new_label()
+        catch_label = self.cg.new_label()
+        end_label = self.cg.new_label()
+
+        code = []
+
+        # Inicio del bloque try
+        code.append(f"{try_label}:")
+        code.append(f"# Setup exception handler: {catch_label}")
+
+        # Visitar bloque try
+        try_block = self.visit(ctx.block(0))
+        code.extend(try_block.code)
+
+        # Si no hubo excepciones, saltar el catch
+        code.append(f"goto {end_label}")
+
+        # Bloque catch
+        code.append(f"{catch_label}:")
+        code.append(f"# Exception caught in {exception_var}")
+
+        # Agregar variable de excepción al contexto
+        old_symbols = self.symbol_table.copy()
+        self.symbol_table[exception_var] = {"type": "exception", "const": False}
+
+        # Visitar bloque catch
+        catch_block = self.visit(ctx.block(1))
+        code.extend(catch_block.code)
+
+        # Restaurar tabla de símbolos
+        self.symbol_table = old_symbols
+
+        # Fin del try-catch
+        code.append(f"{end_label}:")
+
+        return CodeFragment(code, None, "void")
+
     def visitProgram(self, ctx:CompiscriptParser.ProgramContext):
         code = []
 
