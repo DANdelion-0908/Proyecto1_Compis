@@ -548,12 +548,12 @@ class Visitor(CompiscriptVisitor):
         code.append(f"if False {condition.place} goto {elseLabel}")
         code += thenBlock.code
         code.append(f"goto {endLabel}")
-        code.append(f"{elseLabel}")
+        code.append(f"{elseLabel}:")
 
         if elseBlock:
             code += elseBlock.code
-        
-        code.append(f"{endLabel}")
+
+        code.append(f"{endLabel}:")
         
         return CodeFragment(code, None, "void")
     

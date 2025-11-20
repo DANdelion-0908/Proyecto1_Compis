@@ -114,17 +114,28 @@ class MIPSGenerator:
                     self.mips_code.append(f"    lw {reg}, {temp_reg}")
         # Si es un identificador (variable)
         elif operand.replace('_', '').replace('$', '').isalnum():
-            # Verificar si es una variable declarada o un parámetro
-            # Por ahora, asumir que está en el stack frame local
-            if operand not in self.register_map:
-                # Asignar un registro nuevo
-                var_reg = self.get_register(operand)
-                if var_reg.startswith('$'):
-                    # Cargar desde memoria o inicializar
-                    self.mips_code.append(f"    # Cargar variable {operand}")
+            # Verificar si es una variable declarada en .data
+            if operand in self.declared_vars:
+                # Cargar desde memoria global
+                self.mips_code.append(f"    lw {reg}, var_{operand}")
+            elif operand not in self.register_map:
+                # Puede ser un parámetro de función
+                # Si estamos en una función y es un identificador simple, asumimos que es parámetro
+                if self.in_function and operand.isalpha():
+                    # Asignar $a0 como el registro para este parámetro (primer parámetro)
+                    # Para simplicidad, usamos $a0 para el primer parámetro encontrado
+                    self.register_map[operand] = "$a0"
+                    if reg != "$a0":
+                        self.mips_code.append(f"    move {reg}, $a0")
                 else:
-                    # Está en stack
-                    self.mips_code.append(f"    lw {reg}, {var_reg}")
+                    # Asignar un registro nuevo
+                    var_reg = self.get_register(operand)
+                    if var_reg.startswith('$') and var_reg != reg:
+                        # Es un registro, mover si es necesario
+                        self.mips_code.append(f"    move {reg}, {var_reg}")
+                    elif not var_reg.startswith('$'):
+                        # Está en stack
+                        self.mips_code.append(f"    lw {reg}, {var_reg}")
             else:
                 var_reg = self.register_map[operand]
                 if var_reg.startswith('$') and var_reg != reg:
@@ -143,22 +154,56 @@ class MIPSGenerator:
         else:
             lines = tac_code
 
-        # Analizar primero para detectar funciones y variables
+        # PRIMER PASO: Analizar para detectar variables y funciones
+        variables = set()
+        arrays = set()
         has_main = False
+
         for line in lines:
             line = line.strip()
             if line.startswith('main:'):
                 has_main = True
-                break
+                continue
 
-        # Inicializar código MIPS con secciones básicas
-        self.mips_code = [
-            ".data",
+            # Detectar asignaciones de variables (no temporales)
+            if '=' in line and not line.endswith(':'):
+                parts = line.split('=')
+                var_name = parts[0].strip()
+
+                # Si no es temporal (t1, t2, etc.) y no es llamada a función
+                if not (var_name.startswith('t') and var_name[1:].isdigit()):
+                    if 'call' not in line:
+                        variables.add(var_name)
+
+                # Detectar arrays
+                if '[]' in line or 'push(' in line:
+                    arrays.add(var_name)
+
+        # SEGUNDO PASO: Inicializar código MIPS con sección .data
+        self.mips_code = [".data"]
+
+        # Agregar variables declaradas
+        for var in sorted(variables):
+            self.mips_code.append(f"    var_{var}: .word 0")
+            self.declared_vars.add(var)
+
+        # Agregar arrays declarados (con espacio para 100 elementos por defecto)
+        for arr in sorted(arrays):
+            self.mips_code.append(f"    array_{arr}: .space 400  # Espacio para 100 integers")
+
+        # Agregar constantes útiles
+        self.mips_code.extend([
             "    newline: .asciiz \"\\n\"",
-            "",
+            "    true_str: .asciiz \"true\"",
+            "    false_str: .asciiz \"false\"",
+            ""
+        ])
+
+        # TERCER PASO: Sección de texto
+        self.mips_code.extend([
             ".text",
             ".globl main"
-        ]
+        ])
 
         # Si no hay función main explícita, crear una
         if not has_main:
@@ -169,6 +214,7 @@ class MIPSGenerator:
                 ""
             ])
 
+        # CUARTO PASO: Traducir instrucciones
         for line in lines:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -176,7 +222,7 @@ class MIPSGenerator:
 
             self.translate_instruction(line)
 
-        # Finalizar programa solo si estamos en main
+        # QUINTO PASO: Finalizar programa
         if not self.in_function:
             self.mips_code.extend([
                 "",
@@ -270,6 +316,13 @@ class MIPSGenerator:
         dest = parts[0].strip()
         src = parts[1].strip()
 
+        # Si el destino es una variable declarada en .data
+        if dest in self.declared_vars:
+            temp_reg = "$t9"
+            self.load_value(src, temp_reg)
+            self.mips_code.append(f"    sw {temp_reg}, var_{dest}")
+            return
+
         # Obtener registro para el destino
         dest_reg = self.get_register(dest)
 
@@ -322,8 +375,12 @@ class MIPSGenerator:
             self.mips_code.append(f"    div {left_reg}, {right_reg}")
             self.mips_code.append(f"    mfhi {actual_dest}")
 
-        # Si el destino está en stack, guardar el resultado
-        if not dest_reg.startswith('$'):
+        # Guardar resultado
+        if dest in self.declared_vars:
+            # Guardar en variable global
+            self.mips_code.append(f"    sw {actual_dest}, var_{dest}")
+        elif not dest_reg.startswith('$'):
+            # Guardar en stack
             self.mips_code.append(f"    sw {actual_dest}, {dest_reg}")
 
     def translate_relational(self, instruction):
