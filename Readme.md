@@ -5,7 +5,7 @@
 - Eunice Mata, 21231
 - Héctor Penedo, 22217
 
-## Librerias
+## Librerías
 
 Las librerías que utiliza este contenedor son:
 
